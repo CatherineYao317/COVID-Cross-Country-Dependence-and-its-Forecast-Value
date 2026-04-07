@@ -1,0 +1,1280 @@
+---
+title: "Case Study 3: RQ1 Analysis"
+format: pdf
+editor: visual
+---
+
+# Overview
+
+This Quarto document provides a **full step-by-step R workflow** for the analysis of cross-country dependence in aligned daily COVID-19 case-count series.
+
+The workflow is designed to support the research question:
+
+> **What cross-country dependence patterns can be identified in aligned daily COVID-19 case-count series?**
+>
+> The goal is to identify whether any cross-country signal is **stable**, **directional**, and **potentially useful for prediction**, **without making structural causal claims**.
+
+This script is written to match the current direction of the project:
+
+-   build a clean aligned panel of 7 countries,
+-   study co-movement and lead-lag structure,
+-   assess whether cross-country links are stable over time,
+-   fit a more epidemic-oriented model using the **endemic-epidemic framework**,
+-   and produce executive-friendly outputs.
+
+## Working definition of cross-country dependence
+
+In this document, **cross-country dependence** is defined primarily as **lagged predictive relationships across countries after aligning the panel and making the series comparable**. This is deliberately narrower than simple visual co-movement or full-sample correlation. Two countries may move together because of common global waves, synchronized reporting behavior, or shared seasonal pressure without one providing useful predictive content for the other.
+
+Accordingly, the workflow distinguishes four layers of evidence: **(1)** descriptive co-movement, **(2)** lead-lag timing, **(3)** rolling-window stability, and **(4)** forecast value relative to fair country-specific benchmarks. Throughout, VAR, cross-correlation, and Granger-style results are interpreted as **predictive** rather than structural or causal.
+
+# 1. Project setup
+
+## 1.1 Packages
+
+```{r}
+# Install packages once if needed.
+# Uncomment any line below if a package is missing.
+
+# install.packages(c(
+#   "tidyverse", "lubridate", "janitor", "zoo", "slider", "scales",
+#   "patchwork", "GGally", "corrplot", "tsibble", "fable", "feasts",
+#   "tseries", "forecast", "urca", "vars", "broom", "broom.helpers",
+#   "knitr", "kableExtra", "surveillance", "reshape2", "lmtest"
+# ))
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(zoo)
+library(slider)
+library(scales)
+library(patchwork)
+library(GGally)
+library(corrplot)
+library(tsibble)
+library(fable)
+library(feasts)
+library(tseries)
+library(forecast)
+library(urca)
+library(vars)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(surveillance)
+library(reshape2)
+library(lmtest)
+
+# Defensive aliases to avoid function-masking issues
+select <- dplyr::select
+filter <- dplyr::filter
+lag <- dplyr::lag
+```
+
+## 1.2 File path
+
+Update the path below if your CSV is stored elsewhere.
+
+```{r}
+data_path <- "/Users/cy027/Desktop/Master Term 3/STAT 946/Case Study 3/AllNationsCombined.csv"
+```
+
+# 2. Read and inspect the combined data
+
+```{r}
+raw_df <- read_csv(data_path, show_col_types = FALSE) %>%
+  clean_names()
+
+glimpse(raw_df)
+```
+
+```{r}
+head(raw_df)
+```
+
+```{r}
+summary_table <- raw_df %>%
+  summarise(
+    n_rows = n(),
+    n_columns = ncol(.),
+    min_date = min(as.Date(date), na.rm = TRUE),
+    max_date = max(as.Date(date), na.rm = TRUE),
+    n_countries = n_distinct(country_name),
+    n_sources = n_distinct(source_name)
+  )
+
+summary_table
+```
+
+## 2.1 Check countries and coverage
+
+```{r}
+country_coverage <- raw_df %>%
+  mutate(date = as.Date(date)) %>%
+  group_by(country_name) %>%
+  summarise(
+    n_days = n(),
+    start_date = min(date, na.rm = TRUE),
+    end_date = max(date, na.rm = TRUE),
+    min_cases = min(count_value, na.rm = TRUE),
+    max_cases = max(count_value, na.rm = TRUE),
+    population_example = first(total_population),
+    .groups = "drop"
+  )
+
+country_coverage %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+```
+
+This table confirms that the dataset is well structured for cross-country analysis. All seven countries have the same 575-day observation window, from January 4, 2020 to July 31, 2021, which means the study is based on a fully balanced and aligned panel. This is important because it ensures that differences observed later in correlation, lead-lag patterns, or model performance are not driven by unequal data coverage.
+
+The table also shows substantial differences in both population size and peak daily case counts across countries. This indicates that raw case counts are not directly comparable and supports the use of per-capita scaling and transformation in the main analysis. Overall, the table suggests that the data are suitable for dependence modelling, but that meaningful interpretation should rely on normalized rather than raw series.
+
+## 2.1 Why these seven countries
+
+The seven-country panel is intended to balance global diversity with practical comparability. The sample includes countries with different population sizes, reporting environments, outbreak timing, and wave intensity. This is useful for testing whether external epidemic signals generalize beyond one region. At the same time, the panel remains small enough to support transparent pairwise and multivariate modelling without turning the exercise into an unstable high-dimensional system.
+
+This design choice also has limitations. The panel is not globally exhaustive, and any conclusions about cross-country dependence should therefore be interpreted as evidence from a diverse but selective empirical sample, not as a universal statement about all countries. In the final report, this trade-off should be stated clearly: the goal is to study whether international signals can be operationally useful under heterogeneity, not to claim complete global representatives.
+
+## 2.2 Basic data-quality checks
+
+```{r}
+raw_df %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_missing") %>%
+  arrange(desc(n_missing))
+```
+
+```{r}
+raw_df %>%
+  count(country_name, date) %>%
+  filter(n > 1)
+```
+
+# 3. Clean and standardize the panel
+
+## 3.1 Clean names and parse numeric fields
+
+```{r}
+# Some population values may contain commas. We standardize them.
+
+covid_df <- raw_df %>%
+  transmute(
+    country = str_to_title(country_name),
+    date = as.Date(date),
+    source = source_name,
+    cases = as.numeric(count_value),
+    population = readr::parse_number(as.character(total_population)),
+    cases_per_100k = as.numeric(`cases_per_100_000`),
+    cumulative_flag = as.numeric(part_of_cumulative_count_series)
+  ) %>%
+  arrange(country, date)
+
+glimpse(covid_df)
+```
+
+## 3.2 Harmonize country labels
+
+```{r}
+covid_df <- covid_df %>%
+  mutate(
+    country = case_when(
+      country == "United States Of America" ~ "United States",
+      TRUE ~ country
+    )
+  )
+
+sort(unique(covid_df$country))
+```
+
+## 3.3 Keep only the 7 countries of interest
+
+```{r}
+selected_countries <- c(
+  "Australia", "Brazil", "Canada", "China",
+  "South Africa", "United Kingdom", "United States"
+)
+
+covid_df <- covid_df %>%
+  filter(country %in% selected_countries)
+```
+
+## 3.4 Ensure a balanced aligned panel
+
+```{r}
+full_grid <- expand_grid(
+  country = selected_countries,
+  date = seq(min(covid_df$date), max(covid_df$date), by = "day")
+)
+
+panel_df <- full_grid %>%
+  left_join(covid_df, by = c("country", "date")) %>%
+  arrange(country, date)
+
+panel_df %>%
+  count(country, is_missing = is.na(cases))
+```
+
+```{r}
+# If missing values exist, decide how to handle them.
+# Here we carry population/source within country and use linear interpolation for short gaps in cases.
+# If your actual file has no missing values, this step will effectively leave the data unchanged.
+
+panel_df <- panel_df %>%
+  group_by(country) %>%
+  mutate(
+    population = zoo::na.locf(population, na.rm = FALSE),
+    population = zoo::na.locf(population, fromLast = TRUE, na.rm = FALSE),
+    source = zoo::na.locf(source, na.rm = FALSE),
+    source = zoo::na.locf(source, fromLast = TRUE, na.rm = FALSE),
+    cases = zoo::na.approx(cases, na.rm = FALSE),
+    cases_per_100k = zoo::na.approx(cases_per_100k, na.rm = FALSE)
+  ) %>%
+  ungroup()
+```
+
+## 3.5 Reporting-artifact checks and preprocessing decisions
+
+Apparent dependence may be contaminated by reporting backlogs, weekend effects, and negative corrections. The next block creates simple quality flags that can be used both for description and for sensitivity checks.
+
+```{r}
+panel_df <- panel_df %>%
+  group_by(country) %>%
+  mutate(
+    daily_change = cases - dplyr::lag(cases),
+    is_weekend = lubridate::wday(date, week_start = 1) >= 6,
+    negative_correction = daily_change < 0,
+    extreme_jump = daily_change > quantile(daily_change, 0.99, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+artifact_summary <- panel_df %>%
+  group_by(country) %>%
+  summarise(
+    missing_cases = sum(is.na(cases)),
+    negative_corrections = sum(negative_correction, na.rm = TRUE),
+    extreme_jumps = sum(extreme_jump, na.rm = TRUE),
+    weekend_mean_cases = mean(cases[is_weekend], na.rm = TRUE),
+    weekday_mean_cases = mean(cases[!is_weekend], na.rm = TRUE),
+    .groups = "drop"
+  )
+
+artifact_summary %>%
+  kable(digits = 2) %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** This table shows that the dataset is complete, but the raw daily counts are clearly affected by reporting artifacts. There are no missing observations for any country, which is a strength, but all seven countries show frequent negative corrections and some extreme jumps. This suggests that revisions, backfills, and reporting delays are an important feature of the data.
+
+The weekend-versus-weekday differences also indicate that reporting patterns vary across countries. For the report, the key takeaway is that raw daily counts should not be interpreted at face value. Cross-country dependence needs to be assessed on smoothed and transformed series, with sensitivity checks, so that apparent signals are less likely to reflect reporting noise rather than real epidemic linkage.
+
+```{r}
+weekday_profile <- panel_df %>%
+  mutate(weekday = wday(date, label = TRUE, abbr = TRUE, week_start = 1)) %>%
+  group_by(country, weekday) %>%
+  summarise(mean_cases_per_100k = mean(cases_per_100k, na.rm = TRUE), .groups = "drop")
+
+weekday_profile %>%
+  ggplot(aes(x = weekday, y = mean_cases_per_100k, group = country, color = country)) +
+  geom_line() +
+  geom_point(size = 1.2) +
+  labs(title = "Weekday reporting profile by country", x = NULL, y = "Mean cases per 100k") +
+  theme_minimal()
+```
+
+**Comment.** This figure shows that weekday reporting patterns differ meaningfully across countries. Brazil, the United States, and the United Kingdom display clear within-week patterns, while Canada is relatively flat and Australia and China remain near zero on this scale. This suggests that part of the apparent raw co-movement may reflect reporting routines rather than underlying epidemic dynamics.
+
+# 4. Create modelling transformations
+
+The raw daily counts can be very noisy because of reporting practices, weekly cycles, and wave spikes. To improve comparability and stability, we construct several transformed versions.
+
+## 4.1 Main transformed variables
+
+```{r}
+panel_df <- panel_df %>%
+  group_by(country) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(
+    log_cases = log1p(cases),
+    log_cases_per_100k = log1p(cases_per_100k),
+    diff_log_cases = c(NA, diff(log_cases)),
+    diff_log_cases_per_100k = c(NA, diff(log_cases_per_100k)),
+    ma7_cases = zoo::rollmean(cases, k = 7, fill = NA, align = "right"),
+    ma7_cases_per_100k = zoo::rollmean(cases_per_100k, k = 7, fill = NA, align = "right"),
+    ma14_cases_per_100k = zoo::rollmean(cases_per_100k, k = 14, fill = NA, align = "right"),
+    ma7_log_cases_per_100k = log1p(ma7_cases_per_100k),
+    ma14_log_cases_per_100k = log1p(ma14_cases_per_100k),
+    diff_ma7_log_cases_per_100k = c(NA, diff(ma7_log_cases_per_100k)),
+    diff_ma14_log_cases_per_100k = c(NA, diff(ma14_log_cases_per_100k))
+  ) %>%
+  ungroup()
+
+weekday_adjusted_df <- panel_df %>%
+  mutate(weekday = factor(lubridate::wday(date, label = TRUE, abbr = TRUE, week_start = 1))) %>%
+  group_by(country) %>%
+  group_modify(~ {
+    fit <- stats::lm(log1p(cases_per_100k) ~ weekday, data = .x)
+    .x$weekday_adj_log_cases_per_100k <- residuals(fit) + mean(log1p(.x$cases_per_100k), na.rm = TRUE)
+    .x
+  }) %>%
+  ungroup()
+
+panel_df <- panel_df %>%
+  left_join(
+    weekday_adjusted_df %>% dplyr::select(country, date, weekday_adj_log_cases_per_100k),
+    by = c("country", "date")
+  )
+```
+
+## 4.2 Standardized analysis series
+
+For dependence analysis, a standardized scale is helpful. The variable below will be the main working series:
+
+-   `ma7_log_cases_per_100k`: smooths day-to-day reporting noise,
+-   uses per-capita scaling for cross-country comparability,
+-   then applies a log transform for skewness reduction.
+
+```{r}
+panel_df <- panel_df %>%
+  group_by(country) %>%
+  mutate(
+    z_ma7_log_cases_per_100k = as.numeric(scale(ma7_log_cases_per_100k)),
+    z_diff_ma7_log_cases_per_100k = as.numeric(scale(diff_ma7_log_cases_per_100k))
+  ) %>%
+  ungroup()
+```
+
+## 4.3 Transformation strategy and sensitivity design
+
+To preserve wave structure in the descriptive analysis, the report keeps raw daily counts, smoothed per-capita levels, and standardized smoothed per-capita series side by side. Stronger transformations such as difference are reserved for model-based steps where stationarity matters more. This directly addresses the concern that difference can remove the very wave patterns the stakeholder cares about.
+
+```{r}
+transformation_check <- panel_df %>%
+  group_by(country) %>%
+  summarise(
+    corr_ma7_vs_ma14 = cor(ma7_log_cases_per_100k, ma14_log_cases_per_100k, use = "pairwise.complete.obs"),
+    corr_main_vs_weekday_adj = cor(ma7_log_cases_per_100k, weekday_adj_log_cases_per_100k, use = "pairwise.complete.obs"),
+    .groups = "drop"
+  )
+
+transformation_check %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** This table shows that the main analytical series is highly robust to reasonable preprocessing choices. Correlations between the 7-day and 14-day smoothed versions are extremely high across all countries, and the weekday-adjusted series also remains very close to the main specification. This indicates that the broad signal is not being created by one arbitrary smoothing choice. The key takeaway is that the later dependence results are likely to reflect underlying epidemic structure rather than noise. China shows slightly lower robustness than the other countries, but overall the results support the stability of the main transformed series.
+
+# 5. Descriptive plots
+
+## 5.1 Raw daily cases
+
+```{r}
+ggplot(panel_df, aes(x = date, y = cases, color = country)) +
+  geom_line(alpha = 0.8) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Raw daily COVID-19 case counts",
+    x = NULL,
+    y = "Daily cases"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure shows that the seven countries share broad epidemic wave behavior, but the timing and magnitude of those waves differ substantially. The United States and Brazil dominate the raw-count scale, with much larger and more persistent surges than the other countries, while the United Kingdom shows a pronounced spike around late 2020 to early 2021. By contrast, Australia, Canada, China, and South Africa remain much lower on the raw scale for most of the sample, although some still display visible wave structure. At a high level, the chart suggests that there is meaningful international co-movement, but that the strength of that co-movement is uneven and far from synchronous across all countries.
+
+At the same time, the figure also makes clear why raw daily counts should not be the main basis for cross-country comparison. The series are heavily affected by scale differences, with larger countries and larger outbreaks visually dominating the plot. This compresses the variation in smaller series and makes it difficult to judge whether lower-count countries share similar underlying dynamics. The chart is therefore most useful as an initial descriptive view: it confirms that all countries experienced multiple waves, but it also shows that any serious dependence analysis should rely on normalized and transformed measures rather than raw counts alone. For the executive report, the key takeaway is that cross-country signals appear to exist, but they must be evaluated on a comparable scale before drawing conclusions about whether any country provides a stable and useful early-warning signal for others.
+
+## 5.2 Per-capita smoothed log series (main descriptive view)
+
+```{r}
+ggplot(panel_df, aes(x = date, y = ma7_log_cases_per_100k, color = country)) +
+  geom_line(linewidth = 0.8) +
+  labs(
+    title = "7-day smoothed log cases per 100k",
+    x = NULL,
+    y = "log(1 + 7-day moving average cases per 100k)"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure provides the clearest high-level view of cross-country epidemic dynamics because it removes much of the noise that dominates the raw daily counts. By using cases per 100,000, a 7-day moving average, and a log transformation, the series become substantially more comparable across countries and allow the underlying wave structure to be seen more clearly. On this normalized scale, the data show that the seven countries did not simply move together in one common global pattern. Instead, they experienced repeated waves with different timing, different persistence, and different relative intensity.
+
+Several countries show broad periods of elevated incidence at overlapping times, especially around late 2020 and early 2021. It suggests that there is meaningful international co-movement in the data. However, the figure also shows that this co-movement is incomplete rather than uniform. The United Kingdom and the United States exhibit particularly strong surges around late 2020 to early 2021, while Brazil remains persistently elevated across a longer span of the sample. South Africa displays distinct wave behavior with sharper rises and declines, and Canada shows a more moderate but still clearly cyclical pattern. Australia remains comparatively low for most of the period, with only brief spikes, while China is largely flat relative to the other countries. The overall message is that broad global wave behavior exists, but the timing and amplitude are heterogeneous enough that any cross-country dependence is likely to be selective and phase-dependent rather than universally stable.
+
+From an executive perspective, this figure supports two important conclusions. First, external country signals may contain useful information, because several countries show overlapping or sequential wave patterns on a comparable scale. Second, those signals should not be assumed to be uniformly transferable across all countries or all phases of the pandemic. The visual evidence suggests that cross-country dependence is likely to vary over time and by country pair, which strengthens the case for formal lead-lag and stability analysis rather than relying on simple visual co-movement alone. In practical terms, this chart justifies the next stage of the study: identifying whether any of these normalized cross-country patterns are stable enough to support short-term surveillance or early-warning use.
+
+## 5.3 Standardized series for co-movement comparison
+
+```{r}
+ggplot(panel_df, aes(x = date, y = z_ma7_log_cases_per_100k, color = country)) +
+  geom_line(linewidth = 0.7) +
+  labs(
+    title = "Standardized smoothed per-capita case series",
+    x = NULL,
+    y = "Standardized value"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure provides the most useful visual summary of relative epidemic dynamics across countries because each series has been standardized after smoothing and per-capita adjustment. As a result, the chart no longer reflects which country had the largest absolute outbreak. Instead, it shows when each country was unusually high or low relative to its own historical pattern. This makes it a more appropriate view for assessing cross-country co-movement and potential lead-lag structure.
+
+The main signal is that there are periods of shared movement, but the dependence is not globally stable across the full sample. Several countries rise together around late 2020 and early 2021, indicating a period of broad common pressure, but outside that window the trajectories diverge materially. The United Kingdom, United States, and South Africa display pronounced cyclical swings, while Brazil remains more persistently elevated. Canada shows a smoother but still clearly wave-like pattern. Australia is marked by isolated spikes rather than sustained relative elevation, and China appears structurally different from the rest of the panel, with a very sharp early spike followed by an extended flat period. This suggests that any cross-country signal is likely to be selective, time-varying, and potentially influenced by a small number of exceptional episodes rather than by one stable global relationship.
+
+For the executive report, the implication is that external country information may be useful, but only under a conditional monitoring framework. The chart does not support the idea that all countries move together in a consistently synchronized way. Instead, it suggests a more targeted conclusion: some periods exhibit meaningful shared dynamics, but those links weaken or change outside major global wave phases. This strengthens the case for the next analytical step—formal rolling correlation, lead-lag, and stability testing—to determine which relationships are recurrent enough to support operational surveillance use.
+
+# 6. Convert to wide panel format
+
+Wide format is convenient for correlation analysis, cross-correlation, and multivariate models.
+
+```{r}
+wide_main <- panel_df %>%
+  dplyr::select(date, country, z_ma7_log_cases_per_100k) %>%
+  pivot_wider(names_from = country, values_from = z_ma7_log_cases_per_100k) %>%
+  arrange(date)
+
+wide_diff <- panel_df %>%
+  dplyr::select(date, country, z_diff_ma7_log_cases_per_100k) %>%
+  pivot_wider(names_from = country, values_from = z_diff_ma7_log_cases_per_100k) %>%
+  arrange(date)
+
+wide_weekday_adj <- panel_df %>%
+  group_by(country) %>%
+  mutate(z_weekday_adj = as.numeric(scale(weekday_adj_log_cases_per_100k))) %>%
+  ungroup() %>%
+  dplyr::select(date, country, z_weekday_adj) %>%
+  pivot_wider(names_from = country, values_from = z_weekday_adj) %>%
+  arrange(date)
+
+wide_main_ma14 <- panel_df %>%
+  group_by(country) %>%
+  mutate(z_ma14 = as.numeric(scale(ma14_log_cases_per_100k))) %>%
+  ungroup() %>%
+  dplyr::select(date, country, z_ma14) %>%
+  pivot_wider(names_from = country, values_from = z_ma14) %>%
+  arrange(date)
+
+head(wide_main)
+```
+
+# 7. Correlation structure
+
+## 7.1 Full-sample correlation matrix
+
+```{r}
+cor_mat <- wide_main %>%
+  dplyr::select(-date) %>%
+  cor(use = "pairwise.complete.obs")
+
+round(cor_mat, 2)
+```
+
+```{r}
+cor_pairs_tbl <- as.data.frame(as.table(cor_mat), stringsAsFactors = FALSE) %>%
+  as_tibble() %>%
+  stats::setNames(c("country_1", "country_2", "correlation")) %>%
+  dplyr::filter(country_1 != country_2) %>%
+  mutate(pair_id = purrr::map2_chr(country_1, country_2, ~ paste(sort(c(.x, .y)), collapse = "__"))) %>%
+  distinct(pair_id, .keep_all = TRUE) %>%
+  arrange(desc(correlation))
+
+strongest_cor_pair <- cor_pairs_tbl %>% slice(1)
+weakest_cor_pair <- cor_pairs_tbl %>% slice(n())
+strongest_cor_pair
+```
+
+**Comment.** Canada and the United States have the strongest full-sample correlation in the standardized smoothed per-capita series, at about 0.77. This indicates that, relative to their own historical patterns, the two countries show the most similar broad movement over time.
+
+For the report, the key takeaway is that Canada–United States is the strongest candidate pair for meaningful cross-country linkage, but this remains a screening result, not proof of a stable directional relationship. Correlation shows co-movement, not which country leads, whether the pattern is persistent over time, or whether it is driven mainly by major shared wave periods.
+
+```{r}
+corrplot(cor_mat, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+**Comment.** The correlation matrix indicates that cross-country dependence is present, but unevenly distributed across the panel. The strongest positive correlations are concentrated among Canada, the United States, the United Kingdom, and Brazil. In particular, Canada–United States shows the highest full-sample correlation at approximately 0.77, followed by Brazil–South Africa at 0.74, Brazil–United States at 0.73, and United Kingdom–United States at 0.72. These values suggest that a subset of countries shared broadly similar medium-run epidemic movements over the sample period, making them the most plausible candidates for meaningful cross-country linkage.
+
+At the same time, the matrix also shows that dependence is not universal. China is negatively correlated with most other countries, and Australia has weak or negative correlations with much of the panel, apart from a modest positive relationship with South Africa. This suggests that the global panel does not behave as one coherent system. Instead, the dependence structure appears to be clustered: some countries move together relatively strongly, while others follow distinct trajectories. For the executive report, the key takeaway is that international epidemic signals do exist, but they are selective rather than broad-based. This supports a targeted monitoring strategy focused on the strongest country pairs, rather than assuming that all external signals are equally informative.
+
+## 7.2 Rolling correlations
+
+We evaluate whether co-movement is stable over time. A 60-day rolling window is a reasonable starting point; you can try 45 or 90 days as a sensitivity check.
+
+```{r}
+rolling_pair_corr <- function(df, x, y, window = 60) {
+  tibble(
+    date = df$date,
+    corr = slider::slide2_dbl(
+      .x = df[[x]],
+      .y = df[[y]],
+      .f = ~ {
+        if (sum(complete.cases(.x, .y)) < window) return(NA_real_)
+        cor(.x, .y, use = "pairwise.complete.obs")
+      },
+      .before = window - 1,
+      .complete = TRUE
+    ),
+    pair = paste(x, "vs", y)
+  )
+}
+```
+
+```{r}
+country_cols <- setdiff(names(wide_main), "date")
+country_pairs <- combn(country_cols, 2, simplify = FALSE)
+
+rolling_corr_df <- map_dfr(country_pairs, ~rolling_pair_corr(wide_main, .x[1], .x[2], window = 60))
+
+head(rolling_corr_df)
+```
+
+```{r}
+rolling_corr_summary <- rolling_corr_df %>%
+  group_by(pair) %>%
+  summarise(
+    mean_corr = mean(corr, na.rm = TRUE),
+    sd_corr = sd(corr, na.rm = TRUE),
+    min_corr = min(corr, na.rm = TRUE),
+    max_corr = max(corr, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_corr))
+
+rolling_corr_summary %>% slice(1:5)
+```
+
+```{r}
+ggplot(rolling_corr_df, aes(x = date, y = corr)) +
+  geom_line() +
+  facet_wrap(~pair, scales = "free_y") +
+  labs(
+    title = "60-day rolling correlations across country pairs",
+    x = NULL,
+    y = "Rolling correlation"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure shows that cross-country dependence is not stable over time. Although several country pairs exhibit high positive correlation in parts of the sample, those relationships often weaken, reverse, or become highly volatile in other periods. In other words, full-sample correlation can overstate the consistency of international linkage by averaging together very different phases of the pandemic. The rolling results suggest that co-movement is episodic rather than constant.
+
+A second important insight is that the strongest relationships appear to cluster around major global wave periods, especially late 2020 to early 2021. During those phases, several pairs move together more clearly, but outside those windows the correlations often fall sharply and in some cases turn negative. This implies that external country signals may be most informative during synchronized wave periods, but much less reliable during quieter or transitional phases. For the executive report, the key takeaway is that cross-country information should be used conditionally: some international signals are meaningful, but their value is time-varying and should not be treated as uniformly stable throughout the full sample.
+
+## 7.3 Sensitivity check: weekday-adjusted and common-factor adjusted dependence
+
+The next block helps distinguish genuine pairwise dependence from patterns driven by reporting artifacts or shared global shocks.
+
+```{r}
+cor_mat_weekday_adj <- wide_weekday_adj %>%
+  dplyr::select(-date) %>%
+  cor(use = "pairwise.complete.obs")
+
+weekday_adjusted_pairs <- as.data.frame(as.table(cor_mat_weekday_adj), stringsAsFactors = FALSE) %>%
+  as_tibble() %>%
+  stats::setNames(c("country_1", "country_2", "correlation")) %>%
+  dplyr::filter(country_1 != country_2) %>%
+  mutate(pair_id = purrr::map2_chr(country_1, country_2, ~ paste(sort(c(.x, .y)), collapse = "__"))) %>%
+  distinct(pair_id, .keep_all = TRUE) %>%
+  arrange(desc(abs(correlation)))
+
+weekday_adjusted_pairs %>% slice(1:5) %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** the leading cross-country signals appear to be structurally robust rather than purely administrative artifacts. The exact correlation values shift slightly after adjustment, but the ranking of the strongest pairs is broadly stable, which strengthens confidence that the main dependence findings reflect genuine shared epidemic dynamics rather than only reporting mechanics.
+
+```{r}
+pca_for_resid <- wide_main %>% drop_na() %>% dplyr::select(-date)
+pc1_scores <- prcomp(pca_for_resid, center = TRUE, scale. = TRUE)$x[, 1]
+pc1_dates <- wide_main %>% drop_na() %>% pull(date)
+
+resid_against_pc1 <- wide_main %>%
+  drop_na() %>%
+  group_modify(~ .x)
+
+resid_mat <- map_dfc(setdiff(names(wide_main), "date"), function(nm) {
+  tibble(!!nm := resid(lm(wide_main %>% drop_na() %>% pull(nm) ~ pc1_scores)))
+})
+resid_mat <- bind_cols(tibble(date = pc1_dates), resid_mat)
+
+pc1_resid_cor <- resid_mat %>% dplyr::select(-date) %>% cor(use = "pairwise.complete.obs")
+round(pc1_resid_cor, 2)
+```
+
+**Comment.** This residual correlation matrix shows what remains after removing the strongest shared global component from the panel. The key result is that several of the original positive correlations weaken materially or change sign, which suggests that part of the earlier cross-country co-movement was driven by a broad common factor rather than direct pairwise dependence. In other words, some countries appeared to move together mainly because they were exposed to the same global wave.
+
+At the same time, a few pairwise relationships remain sizable even after this adjustment, most notably Canada–South Africa and Brazil–United Kingdom in absolute value. Those pairs are stronger candidates for country-specific linkage because their association is not fully explained by the common global component. For the executive report, the main takeaway is that not all observed cross-country dependence is bilateral in nature: a meaningful share reflects shared global dynamics, but a smaller subset of relationships persists beyond that and deserves closer lead-lag and forecast-value analysis.
+
+# 8. Lead-lag structure with cross-correlation analysis
+
+The main question here is whether changes in one country tend to **precede** changes in another country. We use the differenced smoothed log per-capita series for this step to reduce trend-driven spurious correlation.
+
+## 8.1 Helper function for cross-correlation summaries
+
+```{r}
+get_ccf_summary <- function(df, x, y, lag_max = 21) {
+  temp <- df %>% dplyr::select(all_of(c(x, y))) %>% drop_na()
+
+  ccf_obj <- ccf(temp[[x]], temp[[y]], lag.max = lag_max, plot = FALSE)
+
+  tibble(
+    x = x,
+    y = y,
+    lag = ccf_obj$lag[, , 1],
+    ccf = ccf_obj$acf[, , 1]
+  ) %>%
+    mutate(abs_ccf = abs(ccf)) %>%
+    arrange(desc(abs_ccf)) %>%
+    slice(1) %>%
+    dplyr::select(x, y, dominant_lag = lag, dominant_ccf = ccf)
+}
+```
+
+## 8.2 Pairwise dominant lag table
+
+Interpretation note:
+
+-   a **positive dominant lag** roughly suggests that `x` leads `y`,
+-   a **negative dominant lag** roughly suggests that `y` leads `x`,
+-   this is descriptive, not causal.
+
+```{r}
+ccf_summary <- map_dfr(country_pairs, ~get_ccf_summary(wide_diff, .x[1], .x[2], lag_max = 21))
+
+ccf_summary %>%
+  arrange(desc(abs(dominant_ccf))) %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r}
+strongest_ccf_pair <- ccf_summary %>% arrange(desc(abs(dominant_ccf))) %>% slice(1)
+strongest_ccf_pair
+```
+
+**Comment.** This result suggests that the strongest lead-lag relationship in the sample is between Canada and the United States, with a dominant lag of 1 and a cross-correlation of about 0.33. Interpreted mechanically, this means the two series are most strongly aligned when one is shifted by roughly one day, indicating a short lead-lag structure rather than purely same-day co-movement.
+
+For the executive report, the key takeaway is that the Canada–United States relationship appears not only strongly correlated overall, but also temporally close and potentially operationally relevant. However, the magnitude of the cross-correlation is moderate rather than high, so this should be interpreted as evidence of possible short-horizon predictive linkage, not proof of a stable early-warning relationship. The next question is whether this 1-day pattern persists across rolling windows or appears only in selected periods.
+
+## 8.3 Full cross-correlation profile by pair
+
+```{r}
+get_ccf_full <- function(df, x, y, lag_max = 21) {
+  temp <- df %>% dplyr::select(all_of(c(x, y))) %>% drop_na()
+  ccf_obj <- ccf(temp[[x]], temp[[y]], lag.max = lag_max, plot = FALSE)
+
+  tibble(
+    x = x,
+    y = y,
+    lag = ccf_obj$lag[, , 1],
+    ccf = ccf_obj$acf[, , 1],
+    pair = paste(x, "vs", y)
+  )
+}
+
+ccf_full_df <- map_dfr(country_pairs, ~get_ccf_full(wide_diff, .x[1], .x[2], lag_max = 21))
+```
+
+**Comments.** This lead-lag summary suggests that most cross-country timing relationships are weak to moderate rather than strong. The largest dominant cross-correlation is Canada–United States at 0.326 with a lag of 1 day, which is consistent with the earlier evidence that this is the closest pair in the panel. More broadly, the strongest links are concentrated among a small subset of countries—especially the United States, Canada, and the United Kingdom—while many other pairs have much smaller values. This indicates that cross-country dependence exists, but it is selective and limited, not broad-based across the full seven-country system.
+
+A second important point is that the estimated dominant lags vary widely, from about 1 day to 21 days, and several of the larger-lag relationships are paired with only modest cross-correlation values. That pattern suggests caution. Short lags, such as Canada–United States, are more plausible as operational signals, while longer lags with weak correlations are less convincing as stable early-warning relationships and may reflect episodic alignment rather than persistent predictive structure. Negative dominant cross-correlations for some pairs also indicate that not all countries move in the same direction even after lag adjustment. For the executive report, the key takeaway is that there is no single global lead-lag pattern. Instead, a few country pairs show potentially useful short-horizon linkage, but most relationships appear too weak, too heterogeneous, or too unstable to justify routine surveillance use without further rolling-stability validation.
+
+```{r}
+ggplot(ccf_full_df, aes(x = lag, y = ccf)) +
+  geom_col() +
+  facet_wrap(~pair, scales = "free_y") +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(
+    title = "Cross-correlation functions across lags",
+    x = "Lag",
+    y = "CCF"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure reinforces that cross-country dependence is heterogeneous in both strength and timing. A small number of country pairs display clear positive cross-correlation over a range of nearby lags, most notably pairs involving the United States, Canada, and the United Kingdom. These profiles are more consistent with meaningful short-horizon linkage because the signal is not confined to a single isolated lag. By contrast, many other pairs show weak, flat, or mixed cross-correlation patterns, indicating little evidence of a stable predictive relationship.
+
+The figure also shows that the dependence structure is not symmetric across the full panel. Some country pairs exhibit broad positive peaks, while others remain negative or near zero over most lags. This suggests that international signals are not universally informative: some pairs move together with plausible short-run timing, while others follow distinct trajectories even after allowing for lag adjustments. For the executive report, the main implication is that cross-country information should be used selectively. The strongest candidate links appear concentrated in a limited subset of countries, while much of the remaining panel provides weak or inconsistent timing evidence and is less likely to support reliable early-warning use.
+
+# 9. Rolling lead-lag stability analysis
+
+A major goal of this project is not just to find one-time dependence, but to judge whether the dependence is **stable** and **operationally useful**.
+
+Below, we compute the dominant cross-correlation lag inside rolling windows.
+
+```{r}
+rolling_dominant_lag <- function(df, x, y, window = 90, lag_max = 21) {
+  n <- nrow(df)
+
+  out <- map_dfr(window:n, function(i) {
+    temp <- df[(i - window + 1):i, ] %>% dplyr::select(all_of(c(x, y))) %>% drop_na()
+
+    if (nrow(temp) < window * 0.8) {
+      return(tibble(date = df$date[i], dominant_lag = NA_real_, dominant_ccf = NA_real_))
+    }
+
+    ccf_obj <- ccf(temp[[x]], temp[[y]], lag.max = lag_max, plot = FALSE)
+    lag_vals <- ccf_obj$lag[, , 1]
+    ccf_vals <- ccf_obj$acf[, , 1]
+    idx <- which.max(abs(ccf_vals))
+
+    tibble(
+      date = df$date[i],
+      dominant_lag = lag_vals[idx],
+      dominant_ccf = ccf_vals[idx]
+    )
+  })
+
+  out %>% mutate(pair = paste(x, "vs", y))
+}
+```
+
+```{r}
+rolling_lag_df <- map_dfr(country_pairs, ~rolling_dominant_lag(wide_diff, .x[1], .x[2], window = 90, lag_max = 21))
+
+head(rolling_lag_df)
+```
+
+```{r}
+ggplot(rolling_lag_df, aes(x = date, y = dominant_lag)) +
+  geom_line() +
+  facet_wrap(~pair) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(
+    title = "Rolling dominant lead-lag estimates",
+    x = NULL,
+    y = "Dominant lag"
+  ) +
+  theme_minimal()
+```
+
+**Comment.** This figure suggests that dominant lead-lag relationships are highly unstable over time. For most country pairs, the estimated dominant lag shifts repeatedly across rolling windows, often moving between positive and negative values and sometimes changing sharply in magnitude. This indicates that the timing relationship between countries is not fixed. A lag that appears meaningful in one phase of the pandemic often does not persist into the next, which weakens the case for treating any single full-sample lag estimate as a stable operational signal.
+
+The strongest practical implication is that cross-country timing links appear episodic rather than durable. Some pairs show temporary periods of more consistent lead-lag behavior, but few appear to maintain a narrow and persistent lag structure throughout the sample. For the executive report, the key takeaway is that external country signals may still be useful, but only under a conditional monitoring framework. Any surveillance use should focus on relationships that remain stable across multiple rolling windows; otherwise, apparent lead-lag patterns are more likely to reflect phase-specific alignment than a reliable early-warning relationship.
+
+## 9.1 Stability score for each country pair
+
+A simple practical measure is the proportion of rolling windows where the same lag direction persists.
+
+```{r}
+stability_scores <- rolling_lag_df %>%
+  mutate(direction = case_when(
+    dominant_lag > 0 ~ "x_leads_y",
+    dominant_lag < 0 ~ "y_leads_x",
+    dominant_lag == 0 ~ "synchronous",
+    TRUE ~ NA_character_
+  )) %>%
+  group_by(pair) %>%
+  summarise(
+    n_windows = sum(!is.na(direction)),
+    top_direction = names(sort(table(direction), decreasing = TRUE))[1],
+    top_direction_share = max(prop.table(table(direction))),
+    mean_abs_ccf = mean(abs(dominant_ccf), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(top_direction_share), desc(mean_abs_ccf))
+
+stability_scores %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r}
+most_stable_pair <- stability_scores %>% slice(1)
+most_stable_pair
+```
+
+**Comment.** This result identifies South Africa–United Kingdom as the most stable lead-lag pair in the rolling-window analysis. The dominant direction is x_leads_y, meaning South Africa tends to lead the United Kingdom more often than the reverse, and this direction appears in about 71% of windows. The pair also has a relatively high average absolute cross-correlation of about 0.48, suggesting that the relationship is not only directionally consistent but also nontrivial in strength.
+
+For the executive report, the key takeaway is that South Africa–United Kingdom is the strongest candidate for a recurrent timing relationship in this sample. This does not prove a structural or causal link, but it does suggest that this pair is more operationally promising than most others for monitoring purposes. Among all country pairs, it provides the clearest evidence that the same lead-lag direction repeats over time rather than appearing only in isolated episodes.
+
+# 10. “Sentinel signal” summary
+
+This section creates an executive-friendly summary: which countries appear to lead others more often?
+
+```{r}
+# For each pair x vs y:
+# positive lag -> x leads y
+# negative lag -> y leads x
+
+sentinel_counts <- ccf_summary %>%
+  mutate(
+    leader = case_when(
+      dominant_lag > 0 ~ x,
+      dominant_lag < 0 ~ y,
+      TRUE ~ "Tie/Synchronous"
+    ),
+    follower = case_when(
+      dominant_lag > 0 ~ y,
+      dominant_lag < 0 ~ x,
+      TRUE ~ "Tie/Synchronous"
+    )
+  )
+
+sentinel_score <- sentinel_counts %>%
+  filter(leader != "Tie/Synchronous") %>%
+  count(leader, name = "times_leading") %>%
+  rename(country = leader) %>%
+  arrange(desc(times_leading))
+
+sentinel_score %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** The sentinel score is a simple executive-style summary. It does not replace the full pairwise analysis, but it helps identify which countries most often appear on the leading side of pairwise lag relationships.
+
+```{r}
+ggplot(sentinel_score, aes(x = reorder(country, times_leading), y = times_leading)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Simple sentinel score: how often a country appears to lead others",
+    x = NULL,
+    y = "Count of pairwise leading roles"
+  ) +
+  theme_minimal()
+```
+
+**Interpretation.** This summary suggests that Canada appears most often as the leading country in the pairwise screening results, followed by Australia, while the United Kingdom and the United States occupy an intermediate position. At a high level, this indicates that the lead-lag structure in the sample is not evenly distributed across countries: a small subset appears more frequently on the “leading” side of the strongest pairwise relationships, while others appear much less often.
+
+Potential early-warning value is concentrated rather than broad-based. Canada stands out as the most frequent candidate signal source in this exercise, but the differences across countries should be interpreted cautiously because this is a count-based summary, not a measure of causal influence or forecasting gain. It is best viewed as a prioritization tool: it helps identify which countries deserve closer follow-up in rolling-stability and forecast-value analysis, rather than establishing that they are reliable sentinel indicators on their own.
+
+# 11. Stationarity checks for model-based analysis
+
+For multivariate time-series models, it is safer to work with transformed and differenced series. We run Augmented Dickey-Fuller tests on the differenced smoothed log per-capita series.
+
+```{r}
+adf_results <- wide_diff %>%
+  dplyr::select(-date) %>%
+  map_df(~ {
+    x <- na.omit(.x)
+    test <- adf.test(x)
+    tibble(
+      statistic = as.numeric(test$statistic),
+      p_value = test$p.value
+    )
+  }, .id = "country")
+
+adf_results %>%
+  kable(digits = 4) %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Interpretation.** These results suggest that the transformed series are largely suitable for model-based time-series analysis. Australia, Brazil, Canada, China, the United Kingdom, and the United States all have p-values below 0.05, so the unit-root null is rejected for those countries. In practical terms, this means there is evidence that these series are stationary after the transformations applied, which supports the use of dependence models that assume a more stable mean structure over time.
+
+South Africa is the one exception in this table, with a p-value of 0.1293, indicating weaker evidence of stationarity under the same test. For the executive report, the key takeaway is that the transformation strategy appears to work well for most countries, but South Africa may still retain some residual nonstationarity and should therefore be treated with additional caution in model interpretation and robustness checks. Overall, the results support proceeding with model-based dependence analysis, while recognizing that stationarity is not equally strong across the full panel.
+
+## 11.1 modelling checklist before VAR
+
+Before fitting a VAR, the workflow should make three decisions explicit: **(1)** which transformed series is being modeled, **(2)** whether the series are sufficiently stationary for linear lag modelling, and **(3)** whether the chosen lag order is supported by both information criteria and stability diagnostics.
+
+```{r}
+var_input_comparison <- tibble(
+  series = c("z_diff_ma7_log_cases_per_100k", "z_ma7_log_cases_per_100k"),
+  purpose = c("main VAR input", "descriptive and sensitivity input"),
+  rationale = c("reduces trend-driven spurious dependence", "preserves wave structure and scale comparability")
+)
+
+var_input_comparison %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** This makes the modelling logic explicit: descriptive conclusions are drawn from level-style series, while the benchmark VAR is estimated on a stronger transformation intended to reduce spurious dependence.
+
+# 12. Optional benchmark: parsimonious VAR
+
+Even if VAR is not the final preferred model, it can still be kept as a **benchmark**. This section is optional and helps compare a standard multivariate time-series model against epidemic-specific alternatives.
+
+## 12.1 Prepare VAR input
+
+```{r}
+var_df <- wide_diff %>%
+  drop_na()
+
+var_matrix <- var_df %>% dplyr::select(-date)
+
+dim(var_matrix)
+```
+
+## 12.2 Select lag length
+
+```{r}
+lag_selection <- VARselect(var_matrix, lag.max = 14, type = "const")
+lag_selection$criteria
+```
+
+**Comment.** The lag-selection results do not point to one universally preferred order, but they do indicate that the dependence structure is not well captured by a very short-lag VAR. AIC and FPE reach their best values around lag 8, while HQ favors lag 8–14, whereas SC prefers a much shorter specification. This split is common in multivariate time-series work: more flexible criteria tend to favor longer lag structures, while SC penalizes complexity more aggressively.
+
+For the executive report, the practical takeaway is that the data appear to contain meaningful multi-day dependence, but a high lag order also raises the risk of overfitting in a seven-variable system. This suggests that a plain unrestricted VAR may be difficult to justify as the primary model. If a VAR is kept as a benchmark, a parsimonious choice such as lag 8 is defensible because it is supported by the less restrictive criteria, but the broader result strengthens the case for using a more structured epidemic-oriented model as the main specification.
+
+## 12.3 Fit a simple VAR
+
+```{r}
+# Choose a small lag order based on the selection output.
+# Adjust p if BIC/AIC suggests something else.
+
+p_var <- 3
+var_fit <- VAR(var_matrix, p = p_var, type = "const")
+summary(var_fit)
+```
+
+**Comment.** The VAR results suggest that most predictive structure is country-specific rather than strongly cross-country. In nearly every equation, the country’s own lagged values are the most consistently significant predictors, while external-country coefficients are relatively sparse and uneven. This is especially clear for China, where the model is driven almost entirely by its own lags and the explanatory power is very low ($R^2 \approx 0.10$), indicating limited integration with the rest of the panel. By contrast, the United Kingdom ($R^2 \approx 0.79$) and South Africa ($R^2 \approx 0.65$) are much better explained by the lag structure, but even there the dominant contribution still comes mainly from their own past values.
+
+Cross-country effects do appear, but they are selective rather than broad-based. The clearest examples are the Canada–United States linkage, which shows up in both directions in different equations, and a smaller number of isolated effects involving Brazil, South Africa, and the United Kingdom. However, these cross-country coefficients are not dense enough to suggest a strong, stable multilateral system. Instead, the VAR points to a panel in which a few bilateral relationships may contain useful predictive content, while much of the overall dynamics remain local to each country.
+
+The residual correlation matrix strengthens that interpretation. After accounting for lagged structure, most residual cross-country correlations are small, which means the model has already absorbed much of the shared linear dependence. The remaining unexplained co-movement is limited, with only modest residual correlation in a few pairs such as Australia–Canada. For the executive report, the main takeaway is that the VAR finds some evidence of targeted cross-country predictive linkage, but not a strong or uniform international transmission pattern. This supports using VAR as a benchmark diagnostic, while reinforcing the need for a more structured epidemic-oriented model if the goal is to identify operationally reliable cross-country signals.
+
+```{r}
+var_roots <- roots(var_fit)
+Mod(var_roots)
+```
+
+```{r}
+serial_test_var <- serial.test(var_fit, lags.pt = 14, type = "PT.asymptotic")
+serial_test_var
+```
+
+**Comment.** These checks help distinguish a merely fitted VAR from a defensible benchmark VAR. The model should be interpreted cautiously if it appears dynamically unstable or if residual serial correlation remains substantial.
+
+## 12.4 Granger-causality style tests
+
+```{r}
+# Example: does Brazil help predict Canada?
+# Repeat for pairs of interest.
+
+granger_brazil <- causality(var_fit, cause = "Brazil")
+granger_brazil
+```
+
+**Interpretation.** This test does not provide evidence that Brazil adds system-wide predictive value in the VAR. The Granger-causality null cannot be rejected (p = 0.132), which means Brazil’s lagged values do not significantly improve prediction of the other six countries once the rest of the model is already included. The instantaneous-causality test is even weaker (p = 0.837), so there is also no evidence of a contemporaneous residual linkage between Brazil and the rest of the panel.
+
+For the executive report, the implication is that Brazil does not appear to function as a broad cross-country signal source in this specification. This does not mean Brazil is irrelevant in every bilateral relationship, but it does mean the VAR does not support the claim that Brazil provides reliable panel-wide predictive information beyond what is already captured by each country’s own history and the other included variables.
+
+# 13. Main epidemic-oriented model: endemic-epidemic framework (`hhh4`)
+
+This is the most relevant open-source epidemic model for this project. It is more natural than VAR for **multivariate infectious-disease count data**.
+
+## 13.1 Why this model is useful here
+
+The endemic-epidemic framework decomposes counts into components such as:
+
+-   an **endemic/background** component,
+-   an **autoregressive within-country** component,
+-   and a **cross-country epidemic/spillover** component.
+
+This aligns well with the project’s goal of separating:
+
+-   broad baseline incidence,
+-   within-country persistence,
+-   and cross-country dependence.
+
+## 13.2 Prepare weekly data for `hhh4`
+
+In practice, `hhh4` is often more stable on **weekly** counts than on raw daily counts. This is also more robust to weekday reporting artifacts.
+
+```{r}
+population_lookup <- panel_df %>%
+  group_by(country) %>%
+  summarise(
+    population = dplyr::first(stats::na.omit(population)),
+    .groups = "drop"
+  )
+
+weekly_df <- panel_df %>%
+  mutate(week = floor_date(date, unit = "week", week_start = 1)) %>%
+  group_by(country, week) %>%
+  summarise(
+    weekly_cases = sum(cases, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(population_lookup, by = "country")
+
+head(weekly_df)
+```
+
+```{r}
+weekly_wide <- weekly_df %>%
+  dplyr::select(week, country, weekly_cases) %>%
+  pivot_wider(names_from = country, values_from = weekly_cases) %>%
+  arrange(week)
+
+head(weekly_wide)
+```
+
+## 13.3 Create an `sts` object
+
+```{r}
+obs_matrix <- weekly_wide %>% dplyr::select(-week) %>% as.matrix()
+
+dates_weekly <- weekly_wide$week
+
+population_vec <- population_lookup %>%
+  slice(match(colnames(obs_matrix), country)) %>%
+  pull(population)
+
+stopifnot(length(population_vec) == ncol(obs_matrix))
+
+sts_obj <- sts(
+  observed = obs_matrix,
+  start = c(lubridate::year(min(dates_weekly)), lubridate::isoweek(min(dates_weekly))),
+  frequency = 52,
+  epochAsDate = TRUE,
+  epoch = dates_weekly,
+  populationFrac = population_vec / sum(population_vec)
+)
+
+sts_obj
+```
+
+**Comment.** The dataset has been successfully re-expressed in a format that is more appropriate for epidemic count modelling. Weekly aggregation reduces daily reporting noise and makes the data better aligned with surveillance-style modelling, while still preserving cross-country structure. This step does not yet provide substantive findings on dependence, but it confirms that the data preparation for the `hhh4` model is technically sound and ready for estimation.
+
+## 13.4 Define a simple cross-country weight matrix
+
+Because we currently do not have mobility, air-travel, or distance-based weights, we start with a simple **equal-weight cross-country connectivity matrix**.
+
+This is a baseline choice, not a final epidemiological truth.
+
+```{r}
+K <- ncol(obs_matrix)
+W <- matrix(1, nrow = K, ncol = K)
+diag(W) <- 0
+W <- W / rowSums(W)
+colnames(W) <- colnames(obs_matrix)
+rownames(W) <- colnames(obs_matrix)
+W
+```
+
+**Comment.** This equal-weight matrix is a pragmatic starting point only. If the neighborhood component later looks weak or unstable, one reason may be that equal weights do not represent real epidemiological connectivity well.
+
+## 13.5 Fit a simple `hhh4` model
+
+```{r}
+control_hhh4 <- list(
+  end = list(f = addSeason2formula(~1, period = 52)),
+  ar = list(f = ~1),
+  ne = list(f = ~1, weights = W),
+  family = "NegBin1"
+)
+
+hhh4_fit <- hhh4(sts_obj, control = control_hhh4)
+summary(hhh4_fit)
+```
+
+**Comment.** This output confirms that the `hhh4` model has been specified with a uniform cross-country weight matrix: each country is allowed to exert the same external influence on every other country, while self-links are excluded. In practical terms, the model is not yet assuming that some country pairs are closer or more influential than others; instead, it treats all cross-country epidemic connections symmetrically as a neutral starting point.
+
+The key implication is that this is a baseline epidemic-model specification rather than a final substantive result. It is useful because it allows the model to test whether cross-country spillover exists in aggregate, without imposing strong prior assumptions about which countries should matter more. At the same time, because the weight structure is deliberately simple, any findings from this version should be interpreted as evidence of broad external dependence rather than as proof of specific bilateral transmission channels. If the model shows meaningful external effects under such a neutral setup, that would strengthen the case for refining the weights in later versions based on geography, timing similarity, or empirical linkage strength.
+
+## 13.6 Interpret key components
+
+```{r}
+coef(hhh4_fit)
+```
+
+**Comments.** These coefficients suggest that the `hhh4` model is capturing the data primarily through within-country persistence and broad time variation, while the estimated external-neighbor effect is not substantively interpretable in this baseline specification. The autoregressive coefficient ($ar.1 \approx 0.26$) indicates a moderate level of within-country carryover: recent case activity within a country still matters for predicting the next period, but the persistence is not overwhelmingly strong. The positive endemic and seasonal terms indicate that the model is also picking up a meaningful common time pattern, consistent with the repeated wave structure already seen in the descriptive analysis.
+
+The key caution is the very large negative neighbor coefficient ($ne.1 \approx -25.86$). Under a uniform weight matrix, this is not a credible bilateral interpretation and should not be read as evidence that higher cases in other countries reduce local cases. Instead, it indicates that the current external-component specification is too crude for substantive interpretation. In other words, the model is fitting, but the cross-country spillover term is not yet behaving in a way that supports a meaningful executive conclusion. For the report, the defensible takeaway is that the epidemic-oriented framework confirms the importance of local persistence and time-varying structure, but the external dependence component should be treated as preliminary until a more realistic weight matrix or refined specification is used.
+
+**Results-based reading.** The fitted coefficients are approximately: endemic = **`r round(coef(hhh4_fit)["end.1"], 3)`**, autoregressive = **`r round(coef(hhh4_fit)["ar.1"], 3)`**, neighborhood = **`r round(coef(hhh4_fit)["ne.1"], 3)`**, and overdispersion = **`r round(coef(hhh4_fit)["overdisp"], 3)`**. The negative and unstable neighborhood estimate should be interpreted cautiously: it is more consistent with a misspecified equal-weight network than with evidence that cross-country dependence is absent.
+
+Interpretation guide:
+
+-   larger endemic component -\> more background level not explained by lagged epidemic spread,
+-   larger autoregressive component -\> stronger within-country persistence,
+-   larger neighborhood component -\> stronger cross-country dependence.
+
+## 13.7 Fitted versus observed example
+
+```{r}
+plot(hhh4_fit, type = "fitted")
+```
+
+**Comment.** This fitted-versus-observed plot suggests that the `hhh4` model is capturing the broad timing of Australia’s weekly epidemic waves reasonably well, especially the major surge periods and the late-sample rise. The observed counts and fitted values move together closely around the main peaks, which indicates that the model is able to recover the overall wave structure rather than missing the major outbreak phases entirely.
+
+At the same time, the decomposition shows that the fitted values are driven almost entirely by the autoregressive component, while the endemic and spatiotemporal components contribute very little in this specification. For the executive report, the key takeaway is that the model is fitting Australia primarily through within-country persistence, not through cross-country spillover. This is consistent with the earlier coefficient results: the epidemic-oriented model can reproduce the main pattern of cases, but under the current uniform-weight setup it provides little substantive evidence that external-country transmission is an important driver of Australia’s fitted trajectory.
+
+# 14. Optional common-factor check
+
+This section gives a simple approximation to the idea of a dynamic factor model. If a strong common component dominates the 7-country panel, then much of the dependence may reflect shared global wave structure rather than pair-specific predictive links.
+
+## 14.1 PCA on standardized series
+
+```{r}
+pca_input <- wide_main %>%
+  drop_na() %>%
+  dplyr::select(-date)
+
+pca_fit <- prcomp(pca_input, center = TRUE, scale. = TRUE)
+summary(pca_fit)
+```
+
+```{r}
+pca_var_explained <- summary(pca_fit)$importance[2, ]
+pca_var_explained
+```
+
+**Comment.** PCA is used here as a simple common-factor diagnostic rather than a full dynamic factor model.
+
+**Interpretation.** PC1 explains **`r percent(pca_var_explained[1], accuracy = 0.1)`** of total variance, and the first three PCs explain **`r percent(sum(pca_var_explained[1:3]), accuracy = 0.1)`**. This indicates that a substantial share of the seven-country panel is driven by shared common movement, which supports the idea that part of the observed dependence reflects broad global wave structure rather than only pair-specific lead-lag effects.
+
+```{r}
+plot(pca_fit, type = "l", main = "Scree plot of principal components")
+```
+
+**Comment.** A steep drop after PC1 or PC2 indicates that only a small number of latent common factors are needed to explain much of the panel variation.
+
+## 14.2 First common factor over time
+
+```{r}
+pca_scores <- as_tibble(pca_fit$x) %>%
+  mutate(date = wide_main %>% drop_na() %>% pull(date))
+
+ggplot(pca_scores, aes(x = date, y = PC1)) +
+  geom_line() +
+  labs(
+    title = "First common factor (PC1) across the 7-country panel",
+    x = NULL,
+    y = "PC1 score"
+  ) +
+  theme_minimal()
+```
+
+**Interpretation.** The plot suggests that the cross-country series contain a meaningful common component, but not one dominant factor that fully explains the panel. The first principal component is clearly the largest, and the sharp drop from the first to the second component indicates that a shared international signal is present. However, the remaining components do not collapse immediately to near zero, which means the data still retain substantial country-specific or subgroup-specific variation beyond that common factor.
+
+For the executive report, the key takeaway is that the seven-country system is partly driven by a broad shared epidemic pattern, but not reducible to a single global wave. This supports the earlier findings: there is enough common structure to justify monitoring cross-country signals, but the dependence is not simple or uniform. A common-factor view is useful for summarizing broad international co-movement, yet additional pairwise and time-varying analysis remains necessary because important variation still comes from country-specific dynamics and selective bilateral relationships.
+
+# 15. Forecasting extension (optional preview for RQ2)
+
+This document focuses mainly on dependence identification for **RQ1**. However, a natural next step is to test whether cross-country information improves forecasting.
+
+A practical RQ2 workflow would compare:
+
+1.  country-specific ARIMA / ETS,
+2.  ARIMAX with lagged external-country predictors,
+3.  the endemic-epidemic model,
+4.  and possibly a multivariate benchmark.
+
+Below is a minimal example for one country.
+
+## 15.1 Example: country-specific ARIMA benchmark
+
+```{r}
+canada_ts <- panel_df %>%
+  filter(country == "Canada") %>%
+  dplyr::select(date, y = ma7_log_cases_per_100k) %>%
+  drop_na() %>%
+  as_tsibble(index = date)
+
+canada_fit <- canada_ts %>%
+  model(arima = ARIMA(y))
+
+report(canada_fit)
+```
+
+This result shows that Canada’s transformed case series can be explained well by its own past behavior, including both short-run dynamics and a weekly reporting pattern. The selected model, ARIMA(1,2,2)(0,0,1)\[7\], suggests that Canada’s series contains substantial internal momentum after differencing, while the seasonal term confirms that a 7-day cycle remains relevant even after smoothing and transformation. In practical terms, this means a country-specific benchmark already captures a meaningful amount of predictable structure without using any international information.
+
+For the executive report, the key takeaway is that Canada has a strong domestic time-series signal, so any cross-country model must improve on an already credible univariate benchmark to justify additional complexity. This is important for the project’s decision framework: if multivariate dependence is to be considered operationally useful, it should deliver forecast gains beyond a country-specific model of this quality, not merely fit patterns that Canada’s own history already explains.
+
+## 15.2 Example: simple train-test split
+
+```{r}
+cutoff_date <- as.Date("2021-05-31")
+
+train_canada <- canada_ts %>% filter(date <= cutoff_date)
+test_canada  <- canada_ts %>% filter(date > cutoff_date)
+
+fit_train <- train_canada %>% model(arima = ARIMA(y))
+fc_canada <- forecast(fit_train, new_data = test_canada)
+
+accuracy(fc_canada, test_canada)
+```
+
+## 15.3 Fair rolling multi-horizon evaluation design
+
+Peer feedback emphasized that forecast evaluation should be fair across models. That means using the **same training windows**, **same forecast origins**, **same target transformation**, and **multiple horizons** rather than relying only on a single 7-day-ahead comparison.
+
+```{r}
+horizons <- c(1, 7, 14, 21)
+
+rolling_origin_canada <- function(ts_tbl, initial = 365, step = 7, horizons = c(1, 7, 14, 21)) {
+  origins <- seq(initial, nrow(ts_tbl) - max(horizons), by = step)
+
+  map_dfr(origins, function(i) {
+    train <- ts_tbl[1:i, ]
+    future_tbl <- ts_tbl[(i + 1):(i + max(horizons)), ]
+
+    fit_uni <- train %>% model(arima = ARIMA(y))
+    fc_uni  <- forecast(fit_uni, new_data = future_tbl)
+
+    acc_tbl <- accuracy(fc_uni, future_tbl) %>%
+      as_tibble() %>%
+      mutate(origin_date = max(train$date), model = "ARIMA_benchmark")
+
+    acc_tbl
+  })
+}
+```
+
+```{r}
+systematic_improvement_rule <- tibble(
+  criterion = c(
+    "Mean loss improves over benchmark",
+    "Median loss improves over benchmark",
+    "Improvement appears in more than 60% of forecast origins",
+    "Improvement is not confined to only one horizon"
+  ),
+  interpretation = c(
+    "Average gain is positive",
+    "Gain is not driven only by outliers",
+    "Wins are recurrent rather than occasional",
+    "Operational value is more robust"
+  )
+)
+
+systematic_improvement_rule %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+```
+
+**Comment.** A model should count as operationally useful only if it improves forecasting systematically, not because it wins in a handful of windows. This rule makes that standard explicit for the final report.
+
+# 16. Results-based synthesis for RQ1
+
+Based on the current output, the main analytical conclusions are:
+
+1.  **There is clear cross-country dependence, but it is not uniform.** Some country pairs show much stronger average co-movement than others, so the panel should not be treated as a single homogeneous system.
+2.  **Timing matters.** Cross-correlation analysis suggests that some relationships are directional in the lagged data, but those directions need rolling-window confirmation before they can be treated as operational signals.
+3.  **Stability is the key filter.** The rolling lag results are more informative than any one full-sample estimate because they show whether a lead-lag relationship is persistent, episodic, or unstable.
+4.  **A common global component is important.** The PCA results indicate that a large share of the panel is driven by shared epidemic movement, so not all pairwise dependence should be interpreted as country-to-country predictive linkage.
+5.  **The baseline `hhh4` model is useful, but the equal-weight cross-country network is likely too simplistic.** The current fit supports endemic and within-country persistence effects more clearly than a stable neighborhood spillover effect. In the final report, this should be framed as evidence that the epidemiological weight structure needs refinement, not as proof that cross-country dependence is absent.
+
+**Bottom line for the report.** The seven-country panel contains meaningful cross-country information, but the strongest practical signals are likely to come from a limited subset of country pairs or a small set of higher-level common indicators, not from assuming that every country provides a stable leading signal for every other country.
+
+# 17. Suggested outputs for the final report
+
+For the executive-facing report, I recommend showing the following outputs:
+
+1.  **Aligned series plot** for all 7 countries.
+2.  **Correlation heatmap** to summarize broad co-movement.
+3.  **Cross-correlation / lead-lag figures** to show timing structure.
+4.  **Rolling stability plots** to show whether relationships are persistent or fragile.
+5.  **Sentinel score summary** to identify countries that appear to lead others more often.
+6.  **`hhh4` decomposition results** to distinguish background, within-country, and cross-country components.
+7.  **Common-factor summary** to show whether the panel is mostly driven by a global shared wave.
+8.  A concise recommendation on whether external country signals should be:
+    -   monitored routinely,
+    -   monitored only in selected phases,
+    -   or treated cautiously because of instability.
+
+# 18. Actionable stakeholder recommendation
+
+The final recommendation should translate the statistical evidence into a monitoring rule. A practical template is:
+
+-   **Track cross-country signals routinely** only when a pair or factor shows strong full-sample association, plausible short lags, and recurring direction in rolling windows.
+-   **Track cross-country signals conditionally** during synchronized global wave periods if dependence is visible but unstable outside those phases.
+-   **Default to country-specific models** when pairwise dependence weakens after weekday adjustment, disappears after removing the common factor, or fails to generate systematic forecast improvement relative to univariate benchmarks.
+
+A concise executive conclusion can therefore be written as follows: international epidemic signals are worth monitoring **only when they are stable, transformation-robust, and forecast-relevant**. Otherwise, country-specific models should remain the default and cross-country information should be treated as contextual rather than operational.
