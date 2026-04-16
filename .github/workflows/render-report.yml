@@ -1,0 +1,50 @@
+name: Render Executive Report
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── R setup ────────────────────────────────────────────────────────────
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+
+      - name: Install R packages
+        run: |
+          Rscript -e "install.packages(
+            c('tidyverse', 'knitr', 'kableExtra', 'scales'),
+            repos = 'https://cloud.r-project.org'
+          )"
+
+      # ── Quarto setup ───────────────────────────────────────────────────────
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: "1.6.40"
+
+      # ── Render ─────────────────────────────────────────────────────────────
+      # The executive report reads only pre-committed PNG figures from
+      # Results/Figures/ and CSV scalars from Analysis/. No model fitting
+      # occurs during rendering — all heavy computation was done locally
+      # and its outputs are committed to the repository.
+      - name: Render executive report
+        run: quarto render executive_report.qmd --to pdf
+
+      # ── Upload artifact ────────────────────────────────────────────────────
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-report-pdf
+          path: executive_report.pdf
+          retention-days: 90

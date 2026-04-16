@@ -1,0 +1,342 @@
+---
+title: "Should We Monitor International Epidemic Signals?"
+subtitle: "Cross-Country COVID-19 Dependence and Its Forecast Value"
+date: "April 2026"
+format:
+  pdf:
+    documentclass: article
+    fontsize: 11pt
+    geometry: "margin=1in"
+    number-sections: true
+    colorlinks: true
+    fig-pos: "H"
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{float}
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+# ── Packages ──────────────────────────────────────────────────────────────────
+# Only lightweight table-formatting packages are loaded here.
+# RQ1 figures (fig1–fig4) were pre-generated locally by running
+#   Analysis/case_study_3_RQ1_analysis.qmd and are read from Results/Figures/.
+# RQ2 figures (fig5–fig6) were pre-generated locally by running
+#   Analysis/CS3_RQ2_analysis.ipynb and are read from Results/Figures/.
+# All figures are included via include_graphics() — no heavy computation here.
+# RQ2 derived scalars are read from committed CSV files in Analysis/.
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(scales)
+
+# ── Load committed RQ2 results (for inline scalars only) ─────────────────────
+comparison_df   <- read_csv(
+  "Analysis/comparison_with_hhh4.csv", show_col_types = FALSE)
+
+# ── Derived scalars used inline ───────────────────────────────────────────────
+us_rmse_gain_pct <- comparison_df |>
+  filter(country == "United States") |>
+  mutate(pct = rmse_gain_var2 / benchmark_rmse * 100) |>
+  pull(pct) |>
+  round(1)
+```
+
+<!-- ============================================================ -->
+<!-- CONTEXT SECTION  (for graders; not counted in page limit)   -->
+<!-- ============================================================ -->
+
+\newpage
+
+# Context {.unnumbered}
+
+*This section is provided for the graders and is not part of the executive narrative.*
+
+We are a team of data scientists at an infectious-disease forecasting and decision-support organization that develops short-term outbreak forecasts for public-health agencies.
+Our stakeholder is the **Director of Forecasting and Decision Support**, whose team supplies short-horizon epidemic projections to public-health agencies and health-system planners.
+A recurring operational question motivates this work: when outbreak signals intensify in one country, should forecasting systems serving another country revise their projections accordingly?
+Answering that question rigorously—rather than relying on visual intuition—is precisely the kind of statistical decision support our organization is built to provide.
+
+<!-- ============================================================ -->
+<!-- RESPONSE TO FEEDBACK  (mandatory; ≤ 1 page; not counted)    -->
+<!-- ============================================================ -->
+
+\newpage
+
+# Response to Feedback {.unnumbered}
+
+*This section describes how we addressed technical feedback received after the Progress Update.*
+
+Our original research proposal contained three questions: **(Q1)** whether multivariate time-series models improve short-term forecasts of daily COVID-19 case counts compared with country-specific models; **(Q2)** what common patterns, lead–lag relationships, and directional spillovers exist across the seven countries; and **(Q3)** whether U.S. state-level data provides incremental value beyond the national aggregate.
+
+Feedback from the Progress Update raised four concerns.
+First, COVID-19 was flagged as no longer an active disease of concern, requiring a stronger justification of relevance.
+Second, Q1 was judged "extremely difficult" because there is no prior reason to assume infection dynamics across different countries would be temporally synchronized.
+Third, Q2 and Q3 were considered too disconnected from each other, risking a report consisting of two disjointed analyses with no coherent message.
+Fourth, the "Why it matters" section was considered too generic.
+
+**What we did.** We made a complete pivot in response to all four concerns.
+We dropped Q3 entirely and restructured Q1 and Q2 into a single two-stage investigation: first identify what cross-country dependence actually looks like in the data, then test whether that dependence improves forecasts relative to country-specific baselines.
+This design addresses the disjointedness concern and reframes the original Q1 as a specific, testable claim rather than a vague aspiration.
+We also reframed COVID-19 as a *methodological test bed*—not the final public-health target—to address the relevance concern directly.
+The question of when external regional signals deserve operational weight applies equally to influenza, RSV, and future emerging pathogens; COVID-19 simply provides the richest multi-country surveillance dataset available for studying it rigorously.
+Finally, we concretized the value framing around a real decision our stakeholder faces: should international signals be incorporated as early-warning inputs, or treated cautiously as unreliable noise?
+
+**What we did not do.** We did not retain Q3.
+The feedback rightly identified that adding state-level complexity would overextend the scope without improving coherence; the core question of whether *national* cross-country signals add value is already substantial and self-contained.
+
+The remaining methodological improvements identified in the feedback—explicit stationarity checks before VAR, multiple-model forecast evaluation, sensitivity checks on transformations, and more actionable stakeholder recommendations—are addressed throughout the analysis and reflected in the findings below.
+
+<!-- ============================================================ -->
+<!-- MAIN BODY  (8–12 pages)                                      -->
+<!-- ============================================================ -->
+
+\newpage
+
+# Introduction
+
+Every week, public-health forecasting teams face a quiet judgment call: when case counts climb steeply in the United Kingdom, should the Canada projection be revised upward?
+If international signals reliably anticipate domestic trends, ignoring them wastes potentially valuable early-warning information.
+However, apparent co-movement between countries can be misleading.
+Shared global pressure, synchronized seasonal patterns, and reporting coincidences can all create the appearance of cross-border transmission without any operationally useful lead-lag relationship.
+
+This report answers that judgment call with data.
+Using 575 days of aligned daily case counts from seven countries spanning four continents—Australia, Brazil, Canada, China, South Africa, the United Kingdom, and the United States—we address two questions in sequence.
+
+> **RQ1.** What cross-country dependence patterns can be identified in aligned daily COVID-19 case-count series?
+
+> **RQ2.** When and to what extent does cross-country dependence provide forecast value beyond country-specific benchmark models?
+
+The answer is nuanced but actionable: meaningful dependence exists for a small subset of country pairs, yet that dependence rarely survives the stringent test of systematic forecast improvement.
+The recommendation that follows is therefore specific: maintain country-specific models as the operational default, and monitor international signals only conditionally—for a short list of pairs, during well-defined epidemic phases.
+
+# Data and Analytical Framework
+
+## Data
+
+The analysis uses daily COVID-19 case counts for seven countries from the Project Tycho portal (World Health Organization source), covering January 4, 2020 through July 31, 2021—a fully balanced 575-day panel with no missing country-days after interpolation.
+The seven countries were selected to balance global geographic diversity with practical comparability: they span four continents, include both high- and middle-income settings, and share a common daily reporting window.
+
+Raw case counts are not directly comparable across countries because population sizes differ by more than an order of magnitude.
+All dependence analysis is therefore conducted on series that are (i) converted to cases per 100,000 population, (ii) smoothed with a 7-day moving average to reduce weekly reporting artifacts, (iii) log-transformed to reduce skewness, and (iv) standardized to place every country on a common scale.
+This standardized smoothed per-capita series is the primary analytical object throughout RQ1.
+For RQ2, forecast accuracy is evaluated on the same transformed scale for VAR models, and on raw weekly counts for the endemic-epidemic model.
+
+## Why COVID-19 as a Test Bed
+
+This project is not an epidemiological study of COVID-19 as an active disease of concern.
+Instead, COVID-19 provides a uniquely rich empirical setting for studying a methodological question—when do external regional signals deserve operational weight?—that is directly relevant for influenza, RSV, and future emerging outbreaks.
+The dataset offers long, high-frequency, publicly reported case-count series across multiple countries with heterogeneous timing, repeated waves, and nontrivial reporting artifacts: exactly the conditions that challenge operational surveillance.
+Any framework developed here for judging cross-country forecast value transfers directly to the next pathogen of concern.
+
+## Analytical Framework
+
+The analysis proceeds in four layers of increasingly demanding evidence.
+
+1. **Descriptive co-movement.** Do the standardized series move together across countries, and how strongly?
+2. **Lead-lag structure.** Do changes in some countries systematically *precede* changes in others, rather than occurring simultaneously?
+3. **Rolling stability.** Are the lead-lag relationships persistent over time, or confined to specific epidemic phases?
+4. **Forecast value.** Does cross-country information actually improve out-of-sample predictions beyond strong country-specific benchmarks?
+
+The first three layers address RQ1; the fourth addresses RQ2.
+A cross-country signal is operationally useful only if it passes *all four* layers—descriptive co-movement that is directional, stable over time, and translates into genuine forecast improvement.
+
+# RQ1: What Cross-Country Dependence Patterns Exist?
+
+## Co-Movement Is Real but Uneven
+
+```{r fig-series, fig.cap="Seven-day moving-average log cases per 100,000 population, standardized within each country. Values above zero indicate periods when a country's incidence was above its own historical average; values below zero indicate the reverse. The common scale makes relative timing and wave structure directly comparable across countries.", fig.height=3.8, fig.width=7}
+include_graphics("Results/Figures/fig1_series.png")
+```
+
+@fig-series reveals two things simultaneously.
+First, there are clearly periods of shared movement—most visibly around late 2020 and early 2021—when most countries were simultaneously above their own historical baseline.
+This establishes that cross-country co-movement is not an artifact of scale: it is present even after normalizing each country's series to its own history.
+
+Second, the dependence is far from uniform.
+China follows a structurally different trajectory, with a sharp early spike followed by a prolonged flat period.
+Australia experiences isolated surges rather than sustained elevation.
+Brazil remains persistently above its average for extended stretches.
+The remaining four countries—Canada, South Africa, the United Kingdom, and the United States—display the most visible mutual co-movement, particularly during the winter 2020–21 wave.
+
+```{r fig-heatmap, fig.cap="Pairwise full-sample Pearson correlations of the standardized smoothed per-capita series. Darker blue indicates stronger positive co-movement; darker red indicates negative co-movement. The strongest correlations are concentrated among Canada, the United States, the United Kingdom, and Brazil. China and Australia are weakly or negatively correlated with most of the panel.", fig.height=3.5, fig.width=5.5}
+include_graphics("Results/Figures/fig2_heatmap.png")
+```
+
+@fig-heatmap quantifies the pairwise structure.
+The strongest positive correlations sit among Canada, the United States, the United Kingdom, and Brazil—with Canada–United States at approximately 0.77.
+At the other extreme, China shows negative or near-zero correlations with most of the panel, and Australia is weakly connected to all countries except South Africa.
+The panel therefore does not behave as a single coherent global system: dependence is *selective*, concentrated in a western-hemisphere and European cluster.
+
+## Lead-Lag Structure: Who Moves First?
+
+Co-movement alone does not tell us whether one country's signal could *precede* another's.
+To examine timing, we computed cross-correlation functions between the differenced standardized series for all 21 country pairs, identifying which lag carries the strongest predictive association.
+
+```{r tbl-ccf}
+# Dominant lag table — taken directly from the full-sample CCF output of
+# Analysis/case_study_3_RQ1_analysis.qmd (Section 8.2).
+# Positive lag: x-country leads y-country. Negative lag: y-country leads x-country.
+# Direction column is written from the perspective of the leading country.
+ccf_tbl <- tribble(
+  ~Direction,                          ~`Dominant lag (days)`, ~CCF,
+  "Canada leads United States",                             1,  0.326,
+  "United States leads United Kingdom",                     7,  0.240,
+  "United Kingdom leads South Africa",                      9,  0.230,
+  "Australia leads United States",                          2,  0.217,
+  "Australia leads South Africa",                          21,  0.215,
+  "Canada leads Australia",                                 6,  0.210,
+  "Brazil leads United States",                            15,  0.203,
+  "Canada leads United Kingdom",                            2,  0.194
+)
+
+ccf_tbl |>
+  kable(
+    caption = "Top eight country pairs by full-sample cross-correlation strength, from the differenced standardized series (Analysis/case\\_study\\_3\\_RQ1\\_analysis.qmd, Section 8.2). Direction is expressed from the leading country's perspective. Results are descriptive and do not imply structural causation.",
+    booktabs = TRUE,
+    linesep  = ""
+  ) |>
+  kable_styling(latex_options = c("hold_position", "striped"), font_size = 9)
+```
+
+@tbl-ccf shows that the strongest full-sample lead-lag signal is Canada–United States, with a 1-day dominant lag and a cross-correlation of 0.33.
+The United States leads the United Kingdom at a 7-day horizon; the United Kingdom in turn leads South Africa at 9 days, suggesting a possible sequential diffusion pattern.
+Canada appears as a leading indicator for both the United States and Australia.
+However, several of the highest-ranked pairs involve lags of 15–21 days—Brazil leads United States at 15 days, Australia leads South Africa at 21 days—which are long enough to reflect episodic wave alignment rather than a stable operational signal.
+A cross-correlation of 0.33 at the top is moderate: it indicates *some* predictive content, not a strong or reliable relationship.
+
+## Stability Over Time: When Does Dependence Hold?
+
+```{r fig-rolling, fig.cap="Sixty-day rolling pairwise correlations for the four country pairs with the highest full-sample co-movement. The shaded region marks the major winter 2020--21 wave period. A value near +1 indicates strong shared movement in that 60-day window; a value near 0 or below indicates the relationship has weakened or reversed.", fig.height=4, fig.width=7}
+include_graphics("Results/Figures/fig3_rolling_corr.png")
+```
+
+@fig-rolling is the most important descriptive finding in this report.
+Even for the four strongest pairs, cross-country co-movement is not a constant feature of the data—it is *episodic*.
+The Canada–United States and United Kingdom–United States correlations spike during the shaded winter wave period but weaken materially outside it, at times approaching zero or turning negative.
+South Africa–United Kingdom shows a more stable moderate correlation throughout, but still varies substantially.
+Brazil–United States shows the most volatility, with correlations that turn sharply negative during parts of 2020.
+
+The practical implication is significant: a monitoring system calibrated on full-sample correlations would overestimate the reliability of these signals during quieter or asynchronous epidemic phases.
+Cross-country information appears most useful precisely during synchronized global surges—when country-specific models may already be capturing the common pressure through their own recent history.
+
+## Directional Consistency: Which Pairs Are Most Reliable?
+
+```{r fig-sentinel, fig.cap="Sentinel score: number of pairwise lead-lag relationships in which each country appears on the leading side, computed from the full-sample cross-correlation analysis. A higher score indicates a country more frequently precedes others across the panel. This is a descriptive screening result, not a measure of causal influence.", fig.height=3.5, fig.width=6}
+include_graphics("Results/Figures/fig4_sentinel.png")
+```
+
+@fig-sentinel shows which countries most frequently appear as the early mover in pairwise lead-lag relationships.
+Canada leads the sentinel ranking, appearing on the leading side of the largest number of country pairs, followed by Australia.
+The United Kingdom and United States occupy an intermediate position.
+
+This screening is complemented by a rolling-window stability analysis: of all 21 pairs, South Africa–United Kingdom maintains the most *consistent* directional relationship, with South Africa leading in approximately 71% of 90-day rolling windows—even though the full-sample CCF (Table 1) picks up the opposite direction at a 9-day lag, reflecting a specific high-correlation episode.
+Canada–United States is the second most directionally stable pair.
+Most other pairs oscillate between directions across windows—no better than chance—indicating their apparent lead-lag structure is not a reliable feature of the data.
+
+**RQ1 summary.** Cross-country dependence is real but selective, time-varying, and concentrated around a small subset of pairs.
+A common global wave component—identified by principal component analysis as explaining 53.1% of total panel variance—accounts for much of the full-sample co-movement, meaning that many apparent pairwise correlations partly reflect shared global pressure rather than bilateral predictive linkage.
+Whether the remaining pair-specific structure translates into forecast value is the question that RQ2 answers.
+
+# RQ2: Does Cross-Country Dependence Improve Forecasts?
+
+## Benchmark: Country-Specific Models Are Already Strong
+
+The operational question is whether cross-country information improves on what each country's own recent history already predicts.
+We evaluated two univariate benchmark models—SARIMA and Exponential Smoothing (ETS)—for each country using an expanding-window one-step-ahead design with 169 forecast origins.
+The better-performing model was selected per country: SARIMA for Canada, China, and the United States; ETS for Australia, Brazil, South Africa, and the United Kingdom.
+
+These benchmarks are deliberately demanding.
+A well-specified country-specific model already captures within-country autocorrelation, seasonality, and trend.
+Any cross-country model must improve on this high bar to be considered operationally useful.
+
+## VAR Models: Marginal Gains, Concentrated in Two Countries
+
+```{r fig-rmse, fig.cap="Expanding-window one-step-ahead RMSE across the seven countries: country-specific benchmark (SARIMA or ETS), VAR(2), and VAR(3). For five of seven countries the benchmark bar is shortest—VAR models offer no improvement. The United States and China are the two exceptions where VAR reduces RMSE. Pre-generated by Analysis/CS3\\_RQ2\\_analysis.ipynb.", fig.height=3.5, fig.width=7}
+include_graphics("Results/Figures/fig5_rmse_comparison.png")
+```
+
+@fig-rmse reveals a clear pattern: for five of the seven countries, no VAR specification beats the country-specific benchmark—and for four of those five, the VAR performs noticeably *worse*.
+The two exceptions are **the United States**, where VAR(2) reduces RMSE by `r us_rmse_gain_pct`% relative to the SARIMA baseline, and **China**, where VAR(3) yields a marginal improvement.
+
+The United States result is the most noteworthy finding of the forecast evaluation, but it warrants careful interpretation.
+A VAR(2) fitted to seven countries introduces 98 free parameters; a `r us_rmse_gain_pct`% RMSE improvement represents a real gain, but it is concentrated at a single country and may reflect the specific dynamics of the 2020–21 training window rather than a generalizable cross-country relationship.
+Validation on post-July 2021 data would be required before treating this as an operational recommendation.
+
+## hhh4 Endemic-Epidemic Framework: Spillover Adds Essentially Nothing
+
+As a more principled check on whether cross-country transmission is a meaningful model component, we fit a state-of-the-art endemic-epidemic (`hhh4`) model—a framework designed specifically for multivariate infectious-disease count data—to the weekly case counts.
+This model explicitly decomposes each country's case trajectory into an endemic background component, a within-country autoregressive component, and a cross-country neighborhood spillover component.
+We compared two specifications: a *within-country* model with no cross-border influence, and a *full* model that allows all countries to exert equal influence on one another.
+
+```{r fig-hhh4, fig.cap="hhh4 endemic-epidemic model comparison: within-country model (no cross-border spillover) versus full model (equal-weight connectivity matrix), evaluated over 28 weekly forecast origins. The two bars are nearly identical for every country—the full model adds no forecast value. Pre-generated by Analysis/CS3\\_RQ2\\_analysis.ipynb.", fig.height=3.5, fig.width=7}
+include_graphics("Results/Figures/fig6_hhh4_comparison.png")
+```
+
+@fig-hhh4 delivers the starkest finding of the analysis: for *no country* does adding the cross-country spillover component improve forecast accuracy.
+The differences between the within-country and full models are negligible—measured in scientific notation at the $10^{-4}$ to $10^{-7}$ level relative to RMSE values in the tens of thousands.
+The full model's estimated neighborhood coefficient (approximately $-25.86$) is large and negative; under an equal-weight connectivity matrix, this is an artefact of the specification rather than evidence that cross-country transmission suppresses domestic cases.
+The correct interpretation is that the model's cross-country component finds no stable, extractable signal under this symmetric network assumption.
+
+This is not a failure of the framework: it is a substantive finding.
+The `hhh4` model is specifically designed to detect cross-country epidemic transmission.
+Its inability to improve on the within-country specification—across all seven countries and 28 weekly forecast origins—strongly suggests that cross-country spillover in this dataset does not represent a stable, operationally useful signal under the assumptions tested.
+
+## Why Dependence Does Not Translate into Forecast Value
+
+Three mechanisms explain why descriptive dependence (RQ1) fails to produce consistent forecast gains (RQ2).
+
+**Time-varying relationships.** As @fig-rolling shows, the strongest pairwise correlations concentrate in the winter 2020–21 wave.
+Outside that window the relationships weaken materially.
+A model calibrated on the full sample treats these episodic correlations as if they were constant—a poor approximation for most of the evaluation period.
+
+**A dominant common factor.** Much of the observed co-movement reflects a shared global epidemic pattern rather than country-to-country transmission.
+A country-specific model that tracks each country's own recent history implicitly captures the local manifestation of this common factor, removing most of the apparent advantage of cross-country information.
+
+**Weak bilateral signal after adjustment.** Once reporting artifacts, weekday effects, and the common factor are accounted for, the residual bilateral correlations between most pairs are small.
+Even the most stable pair—South Africa–United Kingdom—does not produce consistent forecast improvement in the out-of-sample evaluation.
+
+**RQ2 summary.** Cross-country dependence provides at most marginal, country-specific forecast improvements.
+The United States is the primary exception with VAR(2), and that result deserves further validation.
+The `hhh4` framework—the most principled model available for this type of cross-country epidemic data—confirms that spillover adds no measurable forecast value across the full panel.
+
+# Recommendation
+
+The evidence supports a **three-tier monitoring framework** calibrated to the actual evidence base, rather than treating all international signals as equally useful.
+
+**Tier 1 — Country-specific models as the operational default.**
+For five of the seven countries studied, well-specified SARIMA or ETS models outperform or match all multivariate alternatives.
+Cross-country surveillance should not be the operational default.
+Country-specific models should remain the primary forecast tool unless one of the conditions below applies.
+
+**Tier 2 — Conditional monitoring during synchronized global waves.**
+During periods of broad international co-movement—identifiable in real time by simultaneously elevated rolling correlations across multiple pairs—South Africa and Canada are the most consistent early-warning candidates for the United Kingdom and the United States respectively.
+The winter 2020–21 period illustrates the configuration that justifies elevated monitoring weight.
+A practical trigger for activating Tier 2 monitoring is when the 60-day rolling correlations for both Canada–United States and United Kingdom–United States simultaneously exceed 0.6—a threshold consistent with the winter 2020–21 episode documented in @fig-rolling.
+During such phases, cross-country signals may provide marginal early-warning value and are worth incorporating as supplementary context, not as primary forecast inputs.
+
+**Tier 3 — VAR complement for United States forecasting.**
+The United States is the one country where a VAR model shows consistent out-of-sample improvement (`r us_rmse_gain_pct`% RMSE reduction with VAR(2) over 169 origins).
+For U.S. short-term forecasting specifically, a seven-country VAR is justified as an operational complement to the SARIMA baseline—subject to out-of-sample validation beyond July 2021.
+Note that a seven-country VAR(2) carries 98 free parameters and requires active monitoring of all partner countries' reporting pipelines; the incremental investment in model maintenance is warranted only after validation confirms the gain persists beyond this training window.
+
+**Three immediate actions.**
+Regardless of which tier ultimately applies, three steps are actionable now.
+First, build a rolling-correlation dashboard tracking Canada–United States and United Kingdom–United States at a 60-day window; this is the leading indicator for Tier 2 activation and requires no model changes.
+Second, validate the United States VAR(2) on post-July 2021 data before any operational deployment—the current evidence covers one training window and one epidemic configuration.
+Third, schedule a quarterly signal review to confirm that the directional relationships identified here remain stable; as @fig-rolling shows, these relationships can reverse, so monitoring assumptions should not be set and forgotten.
+
+**What not to do.**
+The analysis provides no support for treating the `hhh4` neighborhood spillover component, the China signal, or any dominant lag beyond a few days as reliable operational inputs.
+The negative neighborhood coefficient in the `hhh4` full model is a model artefact under the equal-weight network assumption, not evidence of protective cross-country effects.
+
+**Generalizability.**
+These conclusions are based on a specific seven-country panel from 2020–21.
+The framework—identify dependence, test stability, validate against country-specific benchmarks—transfers directly to monitoring influenza, RSV, or future emerging pathogens.
+The lesson is not that international signals are never useful; it is that they must be held to the same standard as any other predictor: demonstrated, stable, out-of-sample forecast improvement over a demanding country-specific baseline.

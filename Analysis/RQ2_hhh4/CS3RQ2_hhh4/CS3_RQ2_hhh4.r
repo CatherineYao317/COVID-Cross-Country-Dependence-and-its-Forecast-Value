@@ -1,3 +1,32 @@
+# =============================================================================
+# CS3_RQ2_hhh4.r
+# Endemic-epidemic (hhh4) robustness check for RQ2
+#
+# Purpose:
+#   Fit two specifications of the hhh4 endemic-epidemic model from the
+#   `surveillance` package to the 7-country weekly COVID-19 panel:
+#     - hhh4_within: within-country components only (endemic + autoregressive),
+#       no cross-border spillover
+#     - hhh4_full: adds an equal-weight neighbourhood spillover component
+#   Both models are evaluated using expanding-window one-step-ahead (OSA)
+#   predictions starting after `initial_train_weeks` weeks.
+#
+# Inputs:
+#   ../../../Data/AllNationsCombined.csv  (daily 7-country case panel)
+#
+# Outputs (written to hhh4_exports/):
+#   hhh4_forecasts_long.csv       long-format OSA forecasts for both models
+#   hhh4_summary_by_country.csv   RMSE/MAE by country and model
+#   hhh4_summary_overall.csv      panel-wide RMSE/MAE by model
+#   hhh4_metadata.csv             run settings (n_weeks, initial_train_weeks)
+#
+# Usage:
+#   Rscript CS3_RQ2_hhh4.r
+#   (run from the directory containing this file)
+#
+# Runtime: ~15-30 minutes depending on hardware.
+# =============================================================================
+
 rm(list = ls())
 
 suppressPackageStartupMessages({
@@ -23,17 +52,30 @@ selected_countries <- c(
 # Weekly panel will have roughly 82 weeks in this dataset.
 initial_train_weeks <- 55
 
-# =========================
+# =============================================================================
 # Helper functions
-# =========================
+# =============================================================================
+
+# safe_rmse: compute RMSE from a vector of squared errors, ignoring NAs
 safe_rmse <- function(x) {
   sqrt(mean(x, na.rm = TRUE))
 }
 
+# safe_mae: compute MAE from a vector of absolute errors, ignoring NAs
 safe_mae <- function(x) {
   mean(x, na.rm = TRUE)
 }
 
+# to_long_osa: reshape a oneStepAhead() result into a tidy long-format data frame.
+#
+# Args:
+#   osa_obj                  object returned by surveillance::oneStepAhead()
+#   model_name               character label (e.g. "hhh4_within") added as a column
+#   time_index_to_week_end   named vector mapping integer time indices to Date values
+#
+# Returns:
+#   data frame with columns: date, pred_time_index, country, model,
+#   actual, forecast, error, abs_error, sq_error
 to_long_osa <- function(osa_obj, model_name, time_index_to_week_end) {
   pred_mat <- as.matrix(osa_obj$pred)
   obs_mat <- as.matrix(osa_obj$observed)
@@ -184,17 +226,26 @@ W <- W / rowSums(W)
 colnames(W) <- selected_countries
 rownames(W) <- selected_countries
 
-# =========================
-# Define two hhh4 models
-# =========================
-# Model 1: within-country only
+# =============================================================================
+# Define two hhh4 model specifications
+# =============================================================================
+# Each hhh4 model decomposes case counts into three additive components:
+#   end  (endemic)  — seasonal background rate, modelled with a sine/cosine pair
+#   ar   (autoregressive) — within-country epidemic self-excitation
+#   ne   (neighbourhood) — cross-country spillover (only in the full model)
+# NegBin1 = Negative Binomial with mean-proportional overdispersion.
+
+# Model 1: within-country only — no cross-border influence
 control_within <- list(
   end = list(f = addSeason2formula(~1, period = 52)),
   ar = list(f = ~1),
   family = "NegBin1"
 )
 
-# Model 2: full model with neighborhood spillover
+# Model 2: full model — adds equal-weight cross-country neighbourhood spillover.
+# W is a row-normalised (K x K) matrix with 0 on the diagonal.
+# The equal-weight assumption means every country influences every other equally;
+# the estimated ne coefficient determines the overall magnitude.
 control_full <- list(
   end = list(f = addSeason2formula(~1, period = 52)),
   ar = list(f = ~1),

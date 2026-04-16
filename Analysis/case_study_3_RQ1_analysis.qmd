@@ -79,7 +79,10 @@ lag <- dplyr::lag
 Update the path below if your CSV is stored elsewhere.
 
 ```{r}
-data_path <- "/Users/cy027/Desktop/Master Term 3/STAT 946/Case Study 3/AllNationsCombined.csv"
+data_path <- "../Data/AllNationsCombined.csv"
+
+# Create output directory for executive report figures
+dir.create("../Results/Figures", recursive = TRUE, showWarnings = FALSE)
 ```
 
 # 2. Read and inspect the combined data
@@ -410,7 +413,7 @@ From an executive perspective, this figure supports two important conclusions. F
 ## 5.3 Standardized series for co-movement comparison
 
 ```{r}
-ggplot(panel_df, aes(x = date, y = z_ma7_log_cases_per_100k, color = country)) +
+p_series <- ggplot(panel_df, aes(x = date, y = z_ma7_log_cases_per_100k, color = country)) +
   geom_line(linewidth = 0.7) +
   labs(
     title = "Standardized smoothed per-capita case series",
@@ -418,6 +421,9 @@ ggplot(panel_df, aes(x = date, y = z_ma7_log_cases_per_100k, color = country)) +
     y = "Standardized value"
   ) +
   theme_minimal()
+
+p_series
+ggsave("../Results/Figures/fig1_series.png", p_series, width = 7, height = 3.8, dpi = 300)
 ```
 
 **Comment.** This figure provides the most useful visual summary of relative epidemic dynamics across countries because each series has been standardized after smoothing and per-capita adjustment. As a result, the chart no longer reflects which country had the largest absolute outbreak. Instead, it shows when each country was unusually high or low relative to its own historical pattern. This makes it a more appropriate view for assessing cross-country co-movement and potential lead-lag structure.
@@ -491,6 +497,9 @@ strongest_cor_pair
 For the report, the key takeaway is that Canada–United States is the strongest candidate pair for meaningful cross-country linkage, but this remains a screening result, not proof of a stable directional relationship. Correlation shows co-movement, not which country leads, whether the pattern is persistent over time, or whether it is driven mainly by major shared wave periods.
 
 ```{r}
+png("../Results/Figures/fig2_heatmap.png", width = 1650, height = 1140, res = 300)
+corrplot(cor_mat, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+dev.off()
 corrplot(cor_mat, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
 ```
 
@@ -555,6 +564,22 @@ ggplot(rolling_corr_df, aes(x = date, y = corr)) +
     y = "Rolling correlation"
   ) +
   theme_minimal()
+
+# Save top-4 pairs subset for executive report
+top_pairs_exec <- c(
+  "Canada vs United States",
+  "Brazil vs South Africa",
+  "Brazil vs United States",
+  "United Kingdom vs United States"
+)
+p_rolling <- rolling_corr_df %>%
+  filter(pair %in% top_pairs_exec) %>%
+  ggplot(aes(x = date, y = corr)) +
+  geom_line() +
+  facet_wrap(~pair, ncol = 2) +
+  labs(x = NULL, y = "60-day rolling correlation") +
+  theme_minimal()
+ggsave("../Results/Figures/fig3_rolling_corr.png", p_rolling, width = 7, height = 4, dpi = 300)
 ```
 
 **Comment.** This figure shows that cross-country dependence is not stable over time. Although several country pairs exhibit high positive correlation in parts of the sample, those relationships often weaken, reverse, or become highly volatile in other periods. In other words, full-sample correlation can overstate the consistency of international linkage by averaging together very different phases of the pandemic. The rolling results suggest that co-movement is episodic rather than constant.
@@ -827,7 +852,7 @@ sentinel_score %>%
 **Comment.** The sentinel score is a simple executive-style summary. It does not replace the full pairwise analysis, but it helps identify which countries most often appear on the leading side of pairwise lag relationships.
 
 ```{r}
-ggplot(sentinel_score, aes(x = reorder(country, times_leading), y = times_leading)) +
+p_sentinel <- ggplot(sentinel_score, aes(x = reorder(country, times_leading), y = times_leading)) +
   geom_col() +
   coord_flip() +
   labs(
@@ -836,6 +861,9 @@ ggplot(sentinel_score, aes(x = reorder(country, times_leading), y = times_leadin
     y = "Count of pairwise leading roles"
   ) +
   theme_minimal()
+
+p_sentinel
+ggsave("../Results/Figures/fig4_sentinel.png", p_sentinel, width = 6, height = 3.5, dpi = 300)
 ```
 
 **Interpretation.** This summary suggests that Canada appears most often as the leading country in the pairwise screening results, followed by Australia, while the United Kingdom and the United States occupy an intermediate position. At a high level, this indicates that the lead-lag structure in the sample is not evenly distributed across countries: a small subset appears more frequently on the “leading” side of the strongest pairwise relationships, while others appear much less often.

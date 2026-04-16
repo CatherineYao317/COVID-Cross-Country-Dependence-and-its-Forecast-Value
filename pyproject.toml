@@ -1,0 +1,12 @@
+[project]
+name = "covid-cross-country-dependence"
+version = "0.1.0"
+description = "Cross-country COVID-19 dependence and its forecast value — STAT 946 Case Study 3"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "scikit-learn>=1.3",
+    "statsmodels>=0.14",
+]

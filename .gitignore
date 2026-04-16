@@ -1,0 +1,25 @@
+# Claude Code internal settings
+.claude/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Jupyter checkpoints
+**/.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# uv virtual environment
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scratch / internal planning docs
+Support_doc/actionable_plan.txt
+Support_doc/feedback.txt
+check_coef.R
