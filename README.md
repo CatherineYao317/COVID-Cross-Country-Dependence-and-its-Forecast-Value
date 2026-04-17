@@ -14,22 +14,29 @@ COVID-19 is used as a methodological test bed — not as the primary public-heal
 .
 ├── Analysis/
 │   ├── case_study_3_RQ1_analysis.qmd   # RQ1: dependence patterns (R)
-│   ├── CS3_RQ2_analysis.ipynb          # RQ2: forecast evaluation (Python)
-│   ├── generate_rq2_figures.py         # Module: figure generation for RQ2
+│   ├── CS3_RQ2_analysis.ipynb          # RQ2: forecast evaluation (Python, with outputs)
+│   ├── generate_rq2_figures.py         # Standalone module: RQ2 figure generation functions
 │   ├── comparison_with_hhh4.csv        # Pre-computed RQ2 scalar results
 │   └── RQ2_hhh4/                       # hhh4 endemic-epidemic model (R)
 │       └── CS3RQ2_hhh4/
 │           ├── CS3_RQ2_hhh4.r          # hhh4 model script
 │           └── hhh4_exports/           # Pre-computed hhh4 results (CSV)
 ├── Data/
-│   ├── AllNationsCombined.csv          # Aligned 7-country daily panel
-│   └── *.csv                           # Per-country raw series
+│   ├── AllNationsCombined.csv          # Aligned 7-country daily panel (primary input)
+│   ├── Australia.csv                   # Per-country raw series
+│   ├── Brazil.csv
+│   ├── Canada.csv
+│   ├── China.csv
+│   ├── South Africa.csv
+│   ├── United Kingdom.csv
+│   └── US.csv
 ├── Results/
 │   └── Figures/                        # Pre-generated figures (fig1–fig6)
 ├── .github/workflows/                  # CI configuration (see workflows/README.md)
 ├── executive_report.qmd                # Final executive report source
 ├── executive_report.pdf                # Rendered report (also available as CI artifact)
-└── pyproject.toml                      # Python dependency specification
+├── pyproject.toml                      # Python dependency specification
+└── uv.lock                             # Pinned Python dependency versions
 ```
 
 ---
@@ -67,7 +74,7 @@ cd Analysis
 quarto render case_study_3_RQ1_analysis.qmd --to pdf
 ```
 
-Output: `Results/Figures/fig1_series.png` through `fig4_sentinel.png`, `Results/case_study_3_RQ1_analysis.pdf`
+Output: `Results/Figures/fig1_series.png` through `fig4_sentinel.png`
 
 > Pre-computed outputs are already committed. Re-running this step is optional.
 
