@@ -23,7 +23,7 @@ jobs:
       - name: Install R packages
         run: |
           Rscript -e "install.packages(
-            c('tidyverse', 'knitr', 'kableExtra', 'scales'),
+            c('dplyr', 'readr', 'tibble', 'knitr', 'kableExtra', 'scales'),
             repos = 'https://cloud.r-project.org'
           )"
 

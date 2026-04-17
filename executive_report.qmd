@@ -31,7 +31,9 @@ execute:
 #   Analysis/CS3_RQ2_analysis.ipynb and are read from Results/Figures/.
 # All figures are included via include_graphics() — no heavy computation here.
 # RQ2 derived scalars are read from committed CSV files in Analysis/.
-library(tidyverse)
+library(dplyr)
+library(readr)
+library(tibble)
 library(knitr)
 library(kableExtra)
 library(scales)
