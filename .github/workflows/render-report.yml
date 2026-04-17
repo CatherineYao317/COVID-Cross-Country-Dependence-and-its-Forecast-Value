@@ -42,10 +42,11 @@ jobs:
           Rscript -e "install.packages(c('dplyr', 'readr', 'tibble', 'knitr', 'kableExtra', 'scales'))"
 
       # ── Quarto setup ───────────────────────────────────────────────────────
-      - name: Set up Quarto
+      - name: Set up Quarto (with TinyTeX for PDF rendering)
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: "1.6.40"
+          tinytex: true
 
       # ── Render ─────────────────────────────────────────────────────────────
       # The executive report reads only pre-committed PNG figures from
