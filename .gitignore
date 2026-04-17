@@ -19,7 +19,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Scratch / internal planning docs
-Support_doc/actionable_plan.txt
-Support_doc/feedback.txt
+# Local-only support documents (not part of the graded submission)
+Support_doc/
 check_coef.R
