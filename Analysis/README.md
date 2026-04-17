@@ -27,7 +27,12 @@ Steps 1–3 can be skipped if using pre-committed outputs. See the root `README.
 
 ## Pre-committed Outputs
 
-All model outputs are committed so the executive report can be rendered without re-running the analysis:
+All model outputs are committed as **verifiable proof that each script ran successfully end-to-end**:
+
+- `case_study_3_RQ1_analysis.pdf` — rendered PDF of the full RQ1 Quarto document, proving `case_study_3_RQ1_analysis.qmd` executed without error
+- `CS3_RQ2_analysis.ipynb` — committed **with all cell outputs retained**, proving the notebook ran end-to-end and all figures, tables, and scalar results are reproducible from the committed code
+
+The figures and CSVs below are the outputs consumed by the executive report:
 
 - `../Results/Figures/fig1_series.png` — standardized 7-day MA log per-capita series (RQ1)
 - `../Results/Figures/fig2_heatmap.png` — pairwise full-sample correlation heatmap (RQ1)

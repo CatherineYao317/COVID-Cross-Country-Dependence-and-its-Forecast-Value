@@ -26,5 +26,3 @@ check_coef.R
 # Duplicate US state-level raw file (tracked version uses space in filename)
 Data/US_States_Territories.csv
 
-# Quarto build artifacts (PDFs rendered locally from QMDs; committed PDF is at repo root)
-Analysis/case_study_3_RQ1_analysis.pdf
