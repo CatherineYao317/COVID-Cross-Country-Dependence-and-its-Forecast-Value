@@ -56,10 +56,16 @@ jobs:
       - name: Render executive report
         run: quarto render executive_report.qmd --to pdf
 
-      # ── Upload artifact ────────────────────────────────────────────────────
-      - name: Upload PDF artifact
+      # The progress update slides use Beamer (xelatex) with no R code.
+      - name: Render progress update slides
+        run: quarto render ProgressUpdateSlides.qmd --to pdf
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: executive-report-pdf
-          path: executive_report.pdf
+          name: rendered-pdfs
+          path: |
+            executive_report.pdf
+            ProgressUpdateSlides.pdf
           retention-days: 90

@@ -1,0 +1,261 @@
+---
+title: "Progress Update"
+subtitle: "Multivariate COVID-19 Forecasting and Dependence Analysis"
+author: "Group 3"
+format:
+  beamer:
+    aspectratio: 169
+    theme: default
+    colortheme: default
+    fontsize: 9pt
+    pdf-engine: xelatex
+    incremental: false
+header-includes:
+  - |
+    \setlength{\itemsep}{0.25em}
+    \setlength{\parskip}{0.2em}
+    \setlength{\leftmargini}{1.2em}
+    \setbeamertemplate{navigation symbols}{}
+    \setbeamertemplate{footline}[frame number]
+execute:
+  echo: false
+---
+
+## Progress Update
+
+
+**Meeting goal**
+
+-   Clarify the statistical targets for Q1--Q3 before substantial computation is invested.
+-   Justify the model classes, assumptions, validation design, and simplification rules.
+-   Flag key risks early: nonstationarity, reporting artifacts, overfitting, and dimensionality.
+
+## Research problem and value added
+
+**Decision context**
+
+-   We support short-horizon outbreak forecasting for public-health decision makers.
+-   Core practical question: can cross-country information improve daily COVID-19 forecasts?
+-   We also ask whether U.S. state-level information adds signal beyond the national series.
+
+**Statistical targets**
+
+-   **Q1:** forecast accuracy
+-   **Q2:** dynamic dependence and predictive linkage
+-   **Q3:** incremental value of subnational summaries
+
+## Translating the research questions into modeling objectives
+
+\small
+
+**Q1. Forecasting objective**
+
+-   Compare separate-country baselines with joint models for 7-day-ahead forecasting.
+
+**Q2. Structural objective**
+
+-   Estimate co-movement, lead--lag timing, and predictive spillovers without claiming causal identification.
+
+**Q3. Subnational extension**
+
+-   Use a low-dimensional summary of U.S. state-level dynamics to test incremental forecasting value.
+
+## Data scope, unit of analysis, and preprocessing
+
+\footnotesize
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.47\textwidth}
+**Input series and analysis unit**
+
+- Main unit: country-level daily case-count series for Australia, Brazil, Canada, China, South Africa, the United Kingdom, and the United States.
+- Q3 extension: U.S. state-level daily series are kept separately and used only to build low-dimensional summary signals.
+- Country series are processed first at source-specific reporting intervals, then converted to daily frequency before cross-country alignment.
+
+\column{0.53\textwidth}
+**Preprocessing pipeline**
+
+- Filter to Outcome = "Unspecified" and retain one selected data source per country.
+- Parse reporting start/end dates and numeric count values; drop invalid rows.
+- For cumulative series: difference consecutive cumulative reports and spread the increment evenly over intervening days.
+- For non-cumulative interval reports: spread the reported count evenly across covered days.
+- Export one cleaned daily file per country, then merge to a common national panel; keep U.S. state output separate for Q3.
+\end{columns}
+
+\vspace{0.4em}
+
+**Design principle:** transform heterogeneous reporting intervals into a reproducible daily panel, then run all forecasting and dependence analyses on that aligned panel.
+
+## RQ1: Do multivariate time-series models improve short-term forecasts of daily COVID-19 case counts across the seven countries compared with separate country-specific models?
+
+## Q1 plan: univariate benchmarks vs multivariate forecasting
+
+\small
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.48\textwidth}
+**Benchmark models**
+
+- **ETS:** flexible baseline for level, trend, and seasonality-type dynamics.
+- **ARIMA:** autoregressive benchmark after transformation and differencing as needed.
+- These are the reference points that a joint model must beat.
+
+\column{0.48\textwidth}
+**Main multivariate candidates**
+
+- **Primary candidate:** parsimonious VAR($p$) on transformed series.
+- **Optional extension:** dynamic factor model if strong common cross-country dynamics are present or if a lower-dimensional representation is preferable.
+- **Working hypothesis:** common epidemic waves should help more at short horizons than long horizons.
+\end{columns}
+
+## Q1 validation design, assumptions, and diagnostics
+
+\small
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.5\textwidth}
+**Validation design**
+
+- Use rolling-origin or expanding-window evaluation to preserve time order.
+- Forecast horizon: 7 days ahead.
+- Primary metrics: RMSE and MAE.
+
+\column{0.5\textwidth}
+**Diagnostics and decision rule**
+
+- **Univariate checks:** residual autocorrelation, differencing order, parameter stability.
+- **VAR checks:** lag selection, companion-matrix stability, residual whiteness, and cross-correlation.
+- Keep a multivariate model only if gains are systematic across rolling windows.
+\end{columns}
+
+## RQ2: What common patterns, lead-lag relationships, and directional spillovers exist in the daily COVID-19 case counts across the seven countries?
+
+## Q2 plan: dependence structure and directional spillovers
+
+\footnotesize
+
+**Step 1. Descriptive co-movement**
+
+-   Standardized time-series plots
+-   Pairwise and rolling correlations
+-   Cross-correlation functions across lags
+
+**Step 2. Model-based dependence**
+
+-   Fit a VAR to test whether lagged changes in one country help predict another.
+-   Use the model only if the system is stable and diagnostics are acceptable.
+
+**Step 3. Directional predictive linkage**
+
+-   Granger-causality tests within the VAR system.
+-   Optional impulse response functions and spillover summaries if estimates remain interpretable.
+
+**Interpretation boundary:** Granger rejection implies predictive content in lagged history, not structural causality.
+
+## Q2 assumptions, caveats, and safeguards
+
+\small
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.5\textwidth}
+**Assumptions / caveats**
+
+- Aligned reporting windows must be reasonably comparable across countries.
+- A low-order linear dynamic system should capture the key dependence after transformation.
+- Reporting artifacts or regime changes can distort lead--lag interpretation.
+- Cross-country comparisons remain limited by different testing and reporting regimes.
+
+\column{0.5\textwidth}
+**Safeguards**
+
+- Sensitivity checks under alternative transformations and differencing choices.
+- Compare descriptive cross-correlation patterns with VAR-based conclusions.
+- Avoid overinterpreting weak or unstable links.
+- Present IRFs only if the estimated system is stable and interpretable.
+\end{columns}
+
+## RQ3: Does U.S. state-level information provide incremental forecasting or structural value beyond aggregate national case counts?
+
+## Q3 plan: using U.S. state-level information without overfitting
+
+\footnotesize
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.49\textwidth}
+**Core design choice**
+
+- We will not put all 50+ states directly into the model.
+- That would create a severe dimensionality problem relative to sample size and would likely be numerically unstable.
+- State-level information enters only through a compact summary vector $x_t$.
+
+\column{0.51\textwidth}
+**Low-dimensional route**
+
+- Possible summaries: PC1 from PCA, dispersion across states, and breadth of increases.
+- Compare national-only U.S. forecasting with an augmented dynamic regression / ARIMAX setup.
+- Keep the summary dimension low so the added signal remains interpretable.
+\end{columns}
+
+## Q3 value and validation plan
+
+\small
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.5\textwidth}
+**What counts as value?**
+
+- **Forecasting value:** lower U.S. forecast error relative to the national-only model.
+- **Structural value:** changes in U.S.-related Granger links, IRFs, or spillover interpretation.
+- Key question: is national aggregation masking internal early-warning structure?
+
+\column{0.5\textwidth}
+**Validation discipline**
+
+- Use the same time-respecting forecast design as Q1.
+- Promote the augmented model only if it improves forecasting and stays interpretable.
+- Do not let Q3 dominate the project if state summaries create instability without clear gains.
+\end{columns}
+
+## Computational feasibility and reproducibility
+
+\small
+
+**Expected workload by component**
+
+-   Data alignment and quality checks: low to moderate
+-   ARIMA / ETS baselines: low
+-   VAR across 7 countries: moderate
+-   Dynamic factor model: higher complexity; pursue only if it adds clear value
+-   PCA + ARIMAX for Q3: moderate
+
+**Reproducibility and fallback plan**
+
+-   Scripted data cleaning and date alignment
+-   Fixed train/test definitions for rolling evaluation
+-   Version-controlled code and saved model specifications
+-   If instability or runtime becomes an issue: keep Q1 as ARIMA/ETS vs VAR, Q2 as correlation + VAR + Granger, and Q3 as PCA + ARIMAX only
+
+## Current status, feedback questions, and take-away
+
+\footnotesize
+
+\begin{columns}[T,totalwidth=\textwidth]
+\column{0.5\textwidth}
+**Current status / expected outputs**
+
+- Research questions are translated into explicit statistical targets.
+- Primary model classes and validation framework are defined.
+- Expected outputs: forecast comparison tables, dependence figures, and a recommendation on whether multivariate and subnational information add value.
+
+\column{0.5\textwidth}
+**What we want feedback on**
+
+- Is VAR the right main multivariate benchmark for Q1/Q2?
+- Should the dynamic factor model remain clearly secondary?
+- Is PCA + ARIMAX the most defensible low-dimensional route for Q3?
+- What extra diagnostics or sensitivity checks would you expect before final comparison?
+\end{columns}
+
+\vspace{0.4em}
+
+**Bottom line:** start from simple baselines, keep multivariate structure only if it improves forecasting, bring in subnational detail only through low-dimensional summaries, and validate every claim with time-respecting evaluation.
