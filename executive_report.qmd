@@ -1,6 +1,6 @@
 ---
 title: "Using International Signals for Short-Horizon Epidemic Forecasting: Evidence from COVID-19"
-date: "April 17th 2026"
+date: "April 17, 2026"
 format:
   pdf:
     documentclass: article
