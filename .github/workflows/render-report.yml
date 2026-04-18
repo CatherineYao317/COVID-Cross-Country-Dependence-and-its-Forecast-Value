@@ -58,7 +58,7 @@ jobs:
 
       # The progress update slides use Beamer (xelatex) with no R code.
       - name: Render progress update slides
-        run: quarto render ProgressUpdateSlides.qmd --to pdf
+        run: quarto render ProgressUpdateSlides.qmd --to beamer
 
       # ── Upload artifacts ───────────────────────────────────────────────────
       - name: Upload PDF artifacts
