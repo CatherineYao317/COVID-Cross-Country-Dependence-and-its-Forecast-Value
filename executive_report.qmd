@@ -325,7 +325,7 @@ This model explicitly decomposes each country's case trajectory into an endemic 
 We compared two specifications: a *within-country* model with no cross-border influence, and a *full* model that allows all countries to exert equal influence on one another.
 
 ```{r fig-hhh4, fig.cap="hhh4 endemic-epidemic model comparison: within-country model (no cross-border spillover) versus full model (equal-weight connectivity matrix), evaluated over 28 weekly forecast origins. The two bars are nearly identical for every country—the full model adds no forecast value.", fig.height=3.5, fig.width=7}
-include_graphics("Results/Figures/fig6_hhh4_comparison.png")
+include_graphics("Results/Figures/fig6_hhh4_comparison .png")
 ```
 
 @fig-hhh4 delivers the clearest result in the report: cross-country spillovers do not improve forecasts.
