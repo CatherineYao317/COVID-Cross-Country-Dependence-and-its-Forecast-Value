@@ -1,5 +1,9 @@
 ---
 title: "Using International Signals for Short-Horizon Epidemic Forecasting: Evidence from COVID-19"
+subtitle: "Executive Report Based on Cross-Country COVID-19 Data"
+author:
+  - "Prepared for the Director of Forecasting and Decision Support"
+  - "Data Scientists Group 3"
 date: "April 17, 2026"
 format:
   pdf:
@@ -62,8 +66,6 @@ us_rmse_gain_pct <- comparison_df |>
 
 # Context {.unnumbered}
 
-*This section is provided for the graders and is not part of the executive narrative.*
-
 We are a team of data scientists at an infectious-disease forecasting and decision-support organization that produces short-term outbreak forecasts for public-health agencies.
 Our stakeholder is the Director of Forecasting and Decision Support, whose team is responsible for delivering short-horizon epidemic projections to public-health agencies and health-system planners.
 
@@ -71,20 +73,18 @@ The practical setting for this project is routine outbreak monitoring and short-
 A recurring operational question is whether signals from one jurisdiction should be incorporated when forecasting outcomes in another.
 In this case, we study whether cross-country COVID-19 case patterns contain information that can improve short-horizon forecasting performance, and whether more granular U.S. state-level signals provide additional value beyond national aggregates.
 
-This problem is well suited to statistical analysis because visual co-movement alone is not enough to justify operational forecasting changes.
+This problem is well-suited to statistical analysis because visual co-movement alone is not enough to justify operational forecasting changes.
 Any recommendation to incorporate external signals must be supported by evidence that the relationships are comparable, stable enough to be useful, and capable of improving forecasts relative to credible country-specific benchmark models.
 
 <!-- ============================================================ -->
 
-<!-- RESPONSE TO FEEDBACK  (mandatory; ≤ 1 page; not counted)    -->
+<!-- RESPONSE TO PROGRESS UPDATE FEEDBACK  (mandatory; ≤ 1 page; not counted)    -->
 
 <!-- ============================================================ -->
 
-\newpage
 
-# Response to Feedback {.unnumbered}
+# Response to Progress Update Feedback {.unnumbered}
 
-*This section describes how we addressed technical feedback received after the Progress Update.*
 
 Our original proposal asked three questions: **(Q1)** whether multivariate models improve short-term forecasts relative to country-specific models, **(Q2)** what cross-country dependence and lead–lag structure exist across the seven countries, and **(Q3)** whether U.S. state-level data adds value beyond the national aggregate.
 
@@ -97,14 +97,38 @@ This made the project more coherent and turned the original forecasting question
 Second, we reframed COVID-19 as a methodological test bed rather than the ultimate disease of interest.
 The broader question—when external regional signals deserve operational weight in short-horizon forecasting—remains relevant for influenza, RSV, and future emerging pathogens, while COVID-19 provides an unusually rich multi-country surveillance dataset for studying it rigorously.
 
-Third, we strengthened the modeling strategy.
+Third, we strengthened the modelling strategy.
 In response to concerns that a standard VAR framework alone would be too limited for epidemic data with sharp peaks and wave-like dynamics, we added the endemic-epidemic HHH4 model in Q2 as a complementary framework.
-This made the analysis less dependent on a single linear time-series model and better aligned the modeling approach with infectious-disease count data.
+This made the analysis less dependent on a single linear time-series model and better aligned the modelling approach with infectious-disease count data.
 
 Finally, we sharpened the stakeholder framing around a concrete decision: whether international signals should be incorporated as early-warning inputs or treated cautiously as unreliable noise.
 We also made clearer why the seven-country panel is still informative: it balances geographic diversity with practical comparability while remaining small enough for transparent dependence analysis.
 
 Overall, the final report is narrower than the original proposal, but substantially stronger in coherence, methodological justification, and decision relevance.
+
+# Executive Summary
+
+**Decision.** Should short-horizon epidemic forecasts routinely incorporate international case signals, or should forecasting teams rely primarily on country-specific models?
+
+**Bottom line.** Cross-country dependence exists, but it is selective, unstable across epidemic phases, and rarely translates into better out-of-sample forecasts.
+For five of the seven countries studied, country-specific benchmark models remain the best operational choice.
+The United States is the one clear exception, where a seven-country VAR(2) reduces RMSE by `r us_rmse_gain_pct`% relative to the SARIMA baseline.
+That result is promising, but it still requires validation beyond July 2021 before it should influence operations.
+
+**What we found.** The seven-country panel does not behave like one coherent global forecasting system.
+The strongest shared movement is concentrated in a small subset of countries, especially Canada, the United States, the United Kingdom, and Brazil.
+Even within this subset, rolling correlations show that dependence is episodic rather than stable.
+A relationship that looks strong in the full sample can weaken sharply or even reverse during other epidemic phases.
+
+**Why this matters operationally.** A descriptive relationship is not enough to justify changing forecasting practice.
+To be operationally useful, an international signal must be present, directional, stable, and able to improve forecasts beyond a strong country-specific benchmark.
+Most signals in this dataset fail at the final step.
+
+**Recommendation.** Keep country-specific models as the operational default.
+Use international signals only as conditional monitoring inputs during synchronized global waves, and only for a small number of country pairs.
+Treat the United States VAR result as a candidate complement to the SARIMA baseline, not as a replacement, until it passes post-July 2021 validation.
+
+**Immediate next steps.** Build a rolling-correlation dashboard for the Canada–United States and United Kingdom–United States pairs, validate the United States VAR(2) on later data, and review these directional relationships quarterly rather than treating them as fixed.
 
 <!-- ============================================================ -->
 
@@ -114,33 +138,24 @@ Overall, the final report is narrower than the original proposal, but substantia
 
 \newpage
 
-# Introduction
+# Decision Problem and Analytical Design
+
+## The decision problem
 
 Each week, public-health forecasting teams face a practical judgment call: when case counts rise sharply in one country, should projections for another country be revised in response?
-If international signals reliably anticipate domestic trends, ignoring them may forfeit valuable early-warning information.
-At the same time, apparent co-movement across countries can be misleading.
-Shared global pressure, common seasonal patterns, and reporting artifacts can all create the appearance of cross-country linkage without producing any operationally useful predictive signal.
+If international signals reliably anticipate domestic trends, ignoring them may forfeit useful early-warning information.
+If they are unstable or merely reflect shared global pressure, incorporating them may add noise, complexity, and false confidence.
 
-This report addresses that question using 575 days of aligned daily COVID-19 case counts from seven countries across four continents: Australia, Brazil, Canada, China, South Africa, the United Kingdom, and the United States.
-Our analysis proceeds in two stages.
-First, we identify the extent to which the aligned series exhibit meaningful cross-country dependence, including common movement, lead-lag structure, and temporal stability.
-Second, we evaluate whether any such dependence translates into forecast value beyond credible country-specific benchmark models.
-
-More specifically, the report is organized around the following two questions:
+This report, therefore, evaluates one operational claim: do international signals add enough forecast value to justify changing short-horizon forecasting practice?
+We answer that question through two linked research questions:
 
 > **RQ1.** What cross-country dependence patterns can be identified in aligned daily COVID-19 case-count series?
 
 > **RQ2.** When, and to what extent, does cross-country dependence provide forecast value beyond country-specific benchmark models?
 
-The main conclusion is nuanced but operationally relevant.
-Meaningful dependence is present for a limited subset of country pairs, but that dependence only rarely survives the stronger test of systematic forecast improvement.
-The recommendation is therefore targeted rather than broad: country-specific models should remain the operational default, while international signals should be monitored conditionally for a small set of country pairs and only during epidemic phases in which those relationships appear stable enough to be useful.
-
-# Data and Analytical Framework
-
 ## Data
 
-The analysis uses daily COVID-19 case counts for seven countries from the Project Tycho portal (World Health Organization source), covering January 4, 2020 through July 31, 2021. This yields a fully balanced 575-day panel, with no missing country-days after preprocessing and interpolation. The seven countries were selected to balance geographic diversity with practical comparability: together they span four continents, include both high- and middle-income settings, and share a common daily reporting window.
+The analysis uses daily COVID-19 case counts for seven countries from the Project Tycho portal (World Health Organization source), covering January 4, 2020 through July 31, 2021. This yields a fully balanced 575-day panel, with no missing country-days after preprocessing and interpolation. The seven countries were selected to balance geographic diversity with practical comparability: together they span four continents, include both high- and middle-income settings, and share a common daily reporting window. These seven countries are Australia, Brazil, Canada, China, South Africa, the United Kingdom, and the United States.
 
 Raw case counts are not directly comparable across countries because population sizes differ substantially and reporting practices vary over time. To make the series comparable, the dependence analysis in RQ1 is conducted on data that are (i) converted to cases per 100,000 population, (ii) smoothed using a 7-day moving average to reduce weekly reporting artifacts, (iii) log-transformed to reduce skewness, and (iv) standardized so that each country is placed on a common scale. This standardized, smoothed, per-capita series serves as the primary analytical object in RQ1, where the goal is to identify whether cross-country dependence is present, selective, and stable enough to matter operationally.
 
@@ -158,27 +173,17 @@ Any framework developed here for assessing cross-country forecast value therefor
 
 ## Analytical Framework
 
-The analysis proceeds through four stages of increasingly demanding evidence.
+The analysis is designed to clear a higher bar than simple correlation screening.
+It combines four layers of evidence:
 
-### 1. Descriptive co-movement
+1. **Descriptive co-movement** to establish whether countries move together at all.
+2. **Lead-lag analysis** to test whether some signals plausibly precede others.
+3. **Rolling stability analysis** to determine whether these relationships persist or are phase-specific.
+4. **Out-of-sample forecast evaluation** to test whether the relationships add value beyond strong univariate baselines.
 
-This stage examines whether the standardized series move together across countries, and how strong those cross-country relationships are.
-
-### 2. Lead-lag structure
-
-This stage evaluates whether changes in some countries systematically precede changes in others, rather than occurring simultaneously.
-
-### 3. Rolling stability
-
-This stage tests whether the lead-lag relationships persist over time or are confined to specific epidemic phases.
-
-### 4. Forecasting Edge
-
-This stage assesses whether cross-country information improves out-of-sample predictions beyond strong country-specific benchmarks.
-
-The first three stages address RQ1, while the fourth addresses RQ2.
-A cross-country signal is operationally useful only if it clears all four stages.
-It is not enough for the series to move together; the relationship must also be directional, stable over time, and capable of delivering a genuine improvement in forecast performance.
+This design is statistically principled and computationally intensive because it does not stop at in-sample fit.
+It evaluates multiple model classes, repeated forecast origins, and time-varying dependence diagnostics before making an operational recommendation.
+That is the right standard for a decision that could change live forecasting practice.
 
 # RQ1: What cross-country dependence patterns can be identified in aligned daily COVID-19 case-count series?
 
