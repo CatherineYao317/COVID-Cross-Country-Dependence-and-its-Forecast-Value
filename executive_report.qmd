@@ -343,23 +343,17 @@ This is not a failure of the framework: it is a substantive finding.
 The `hhh4` model is specifically designed to detect cross-country epidemic transmission.
 Its inability to improve on the within-country specification—across all seven countries and 28 weekly forecast origins—strongly suggests that cross-country spillover in this dataset does not represent a stable, operationally useful signal under the assumptions tested.
 
-## Why Dependence Does Not Translate into Forecast Value
+## Why Broad Forecast Gains Remain Limited — but Some Signals Merit Follow-Up
 
-Three mechanisms explain why descriptive dependence (RQ1) fails to produce consistent forecast gains (RQ2).
+The results do not provide sufficient evidence that international dependence delivers broad forecast value across the full seven-country panel. Although several countries move closely together during major wave periods, those relationships are not stable enough to support a general global forecasting rule.
 
-**Time-varying relationships.** As @fig-rolling shows, the strongest pairwise correlations concentrate in the winter 2020–21 wave.
-Outside that window the relationships weaken materially.
-A model calibrated on the full sample treats these episodic correlations as if they were constant—a poor approximation for most of the evaluation period.
+**Time-varying relationships.** As @fig-rolling shows, the strongest pairwise correlations are concentrated in the winter 2020–21 wave and weaken materially outside that period. A model calibrated on the full sample therefore risks treating episodic relationships as if they were stable throughout the evaluation period.
 
-**A dominant common factor.** Much of the observed co-movement reflects a shared global epidemic pattern rather than country-to-country transmission.
-A country-specific model that tracks each country's own recent history implicitly captures the local manifestation of this common factor, removing most of the apparent advantage of cross-country information.
+**A dominant common factor.** Much of the observed co-movement appears to reflect shared global epidemic pressure rather than a consistent country-to-country predictive mechanism. Country-specific models already capture the local expression of that common pattern, which limits the incremental value of adding international signals.
 
-**Weak bilateral signal after adjustment.** Once reporting artifacts, weekday effects, and the common factor are accounted for, the residual bilateral correlations between most pairs are small.
-Even the most stable pair—South Africa–United Kingdom—does not produce consistent forecast improvement in the out-of-sample evaluation.
+**Selective bilateral value rather than broad global value.** After accounting for reporting artefacts, weekday effects, and the common factor, most bilateral relationships remain too weak or unstable to generate reliable out-of-sample gains. At the same time, the evidence suggests that not all international signals should be dismissed equally. In particular, Canada and the United States move closely in the same direction across several parts of the sample, and the United States is also the one country for which the VAR model shows a meaningful improvement. This does not justify a broad cross-country forecasting rule, but it does suggest that a more focused follow-up project on the Canada–United States relationship could be worthwhile.
 
-**RQ2 summary.** Cross-country dependence provides at most marginal, country-specific forecast improvements.
-The United States is the primary exception with VAR(2), and that result deserves further validation.
-The `hhh4` framework—the most principled model available for this type of cross-country epidemic data—confirms that spillover adds no measurable forecast value across the full panel.
+**Takeaway.** Cross-country dependence provides, at most, limited and country-specific forecast gains rather than broad global predictive value. The United States remains the main exception under VAR(2), though that result still requires further validation. More broadly, the `hhh4` results indicate that cross-border spillover does not add measurable forecast value across the full panel. 
 
 # Recommendation
 
