@@ -343,7 +343,7 @@ This is not a failure of the framework: it is a substantive finding.
 The `hhh4` model is specifically designed to detect cross-country epidemic transmission.
 Its inability to improve on the within-country specification—across all seven countries and 28 weekly forecast origins—strongly suggests that cross-country spillover in this dataset does not represent a stable, operationally useful signal under the assumptions tested.
 
-## Why Forecast Gains Remain Limited
+## Why Broad Forecast Gains Remain Limited — but Some Signals Merit Follow-Up
 
 The results do not provide sufficient evidence that international dependence delivers broad forecast value across the full seven-country panel. Although several countries move closely together during major wave periods, those relationships are not stable enough to support a general global forecasting rule.
 
