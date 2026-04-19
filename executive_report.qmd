@@ -185,7 +185,7 @@ That is the right standard for a decision that could change live forecasting pra
 
 ## Co-Movement Is Real but Uneven
 
-```{r fig-series, fig.cap="Seven-day moving-average log cases per 100,000 population, standardized within each country. Values above zero indicate periods when a country's incidence was above its own historical average; values below zero indicate the reverse. The common scale makes relative timing and wave structure directly comparable across countries.", fig.height=3.8, fig.width=7}
+```{r fig-series, fig.cap="Seven-day moving-average log cases per 100,000, standardized within each country. The common scale makes timing and wave structure comparable across countries.", fig.height=3.8, fig.width=7}
 include_graphics("Results/Figures/fig1_series.png")
 ```
 
@@ -199,7 +199,7 @@ Australia experiences isolated surges rather than sustained elevation.
 Brazil remains persistently above its average for extended stretches.
 The remaining four countries—Canada, South Africa, the United Kingdom, and the United States—display the most visible mutual co-movement, particularly during the winter 2020–21 wave.
 
-```{r fig-heatmap, fig.cap="Pairwise full-sample Pearson correlations of the standardized smoothed per-capita series. Darker blue indicates stronger positive co-movement; darker red indicates negative co-movement. The strongest correlations are concentrated among Canada, the United States, the United Kingdom, and Brazil. China and Australia are weakly or negatively correlated with most of the panel.", fig.height=3.5, fig.width=5.5}
+```{r fig-heatmap, fig.cap="Pairwise Pearson correlations of the standardized smoothed per-capita series. Strongest co-movement appears among Canada, the United States, the United Kingdom, and Brazil; China and Australia are weakly or negatively correlated with most of the panel.", fig.height=3.5, fig.width=5.5}
 include_graphics("Results/Figures/fig2_heatmap.png")
 ```
 
@@ -233,7 +233,7 @@ ccf_tbl <- tribble(
 
 ccf_tbl |>
   kable(
-    caption = "Top eight country pairs by full-sample cross-correlation strength, from the differenced standardized series (Analysis/case\\_study\\_3\\_RQ1\\_analysis.qmd, Section 8.2). Direction is expressed from the leading country's perspective. Results are descriptive and do not imply structural causation.",
+    caption = "Top eight country pairs by full-sample cross-correlation. Direction is shown from the leading country’s perspective. Results are descriptive, not causal.",
     booktabs = TRUE,
     linesep  = ""
   ) |>
@@ -248,7 +248,7 @@ The practical implication is that cross-country timing structure exists, but it 
 
 ## Stability Over Time: When Does Dependence Hold?
 
-```{r fig-rolling, fig.cap="Sixty-day rolling pairwise correlations for the four country pairs with the highest full-sample co-movement. The shaded region marks the major winter 2020--21 wave period. A value near +1 indicates strong shared movement in that 60-day window; a value near 0 or below indicates the relationship has weakened or reversed.", fig.height=4, fig.width=7}
+```{r fig-rolling, fig.cap="Sixty-day rolling correlations for the four strongest country pairs. The shaded region marks the winter 2020–21 wave; values near +1 indicate strong co-movement, while values near 0 or below indicate weakening or reversal.", fig.height=4, fig.width=7}
 include_graphics("Results/Figures/fig3_rolling_corr.png")
 ```
 
@@ -266,7 +266,7 @@ As a result, international signals should be treated as conditional inputs rathe
 
 ## Directional Consistency: Which Pairs Are Most Reliable?
 
-```{r fig-sentinel, fig.cap="Sentinel score: number of pairwise lead-lag relationships in which each country appears on the leading side, computed from the full-sample cross-correlation analysis. A higher score indicates a country more frequently precedes others across the panel. This is a descriptive screening result, not a measure of causal influence.", fig.height=3.5, fig.width=6}
+```{r fig-sentinel, fig.cap="Sentinel score: frequency with which each country appears as the leader in pairwise lead-lag relationships. Results are descriptive, not causal.", fig.height=3.5, fig.width=6}
 include_graphics("Results/Figures/fig4_sentinel.png")
 ```
 
@@ -286,7 +286,7 @@ On that stricter standard, only a very small number of country pairs remain cred
 
 RQ1 finds that cross-country dependence is real, but operationally limited.
 The data do not support treating the seven countries as one coherent global system.
-Instead, dependence is selective, concentrated in a small subset of country pairs, and highly sensitive to epidemic phase.
+Instead, dependence is selective, concentrated in a small subset of country pairs, and highly sensitive to the epidemic phase.
 While a few relationships—notably Canada–United States—show stronger and more persistent linkage than the rest of the panel, most apparent lead–lag patterns are too unstable to be relied on as routine early-warning signals.
 For decision support, the implication is clear: international information may be useful, but only in a targeted and conditional way.
 
@@ -304,7 +304,7 @@ Any cross-country model must improve on this high bar to be considered operation
 
 ## VAR Models: Marginal Gains, Concentrated in Two Countries
 
-```{r fig-rmse, fig.cap="Expanding-window one-step-ahead RMSE across the seven countries: country-specific benchmark (SARIMA or ETS), VAR(2), and VAR(3). For five of seven countries the benchmark bar is shortest—VAR models offer no improvement. The United States and China are the two exceptions where VAR reduces RMSE.", fig.height=3.5, fig.width=7}
+```{r fig-rmse, fig.cap="Expanding-window one-step-ahead RMSE across seven countries. The benchmark performs best in five countries; VAR improves RMSE only for the United States and China.", fig.height=3.5, fig.width=7}
 include_graphics("Results/Figures/fig5_rmse_comparison.png")
 ```
 
@@ -325,7 +325,7 @@ As a more principled check on whether cross-country transmission is a meaningful
 This model explicitly decomposes each country's case trajectory into an endemic background component, a within-country autoregressive component, and a cross-country neighborhood spillover component.
 We compared two specifications: a *within-country* model with no cross-border influence, and a *full* model that allows all countries to exert equal influence on one another.
 
-```{r fig-hhh4, fig.cap="hhh4 endemic-epidemic model comparison: within-country model (no cross-border spillover) versus full model (equal-weight connectivity matrix), evaluated over 28 weekly forecast origins. The two bars are nearly identical for every country—the full model adds no forecast value.", fig.height=3.5, fig.width=7}
+```{r fig-hhh4, fig.cap="hhh4 model comparison over 28 weekly forecast origins. Adding cross-border spillover provides essentially no forecast value.", fig.height=3.5, fig.width=7}
 include_graphics("Results/Figures/fig6_hhh4_comparison .png")
 ```
 
@@ -363,7 +363,7 @@ The `hhh4` framework—the most principled model available for this type of cros
 
 # Recommendation
 
-The evidence supports a **three-tier monitoring framework** calibrated to the actual evidence base, rather than treating all international signals as equally useful.
+The evidence supports a three-tier monitoring framework calibrated to the actual evidence base, rather than treating all international signals as equally useful.
 
 **Tier 1 — Country-specific models as the operational default.** For five of the seven countries studied, well-specified SARIMA or ETS models outperform or match all multivariate alternatives. Therefore, cross-country surveillance should not be the operational default. In most cases, country-specific models should remain the primary forecasting tool.
 
