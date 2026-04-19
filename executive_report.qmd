@@ -101,10 +101,7 @@ Third, we strengthened the modelling strategy.
 In response to concerns that a standard VAR framework alone would be too limited for epidemic data with sharp peaks and wave-like dynamics, we added the endemic-epidemic HHH4 model in Q2 as a complementary framework.
 This made the analysis less dependent on a single linear time-series model and better aligned the modelling approach with infectious-disease count data.
 
-Finally, we sharpened the stakeholder framing around a concrete decision: whether international signals should be incorporated as early-warning inputs or treated cautiously as unreliable noise.
-We also made clearer why the seven-country panel is still informative: it balances geographic diversity with practical comparability while remaining small enough for transparent dependence analysis.
-
-Overall, the final report is narrower than the original proposal, but substantially stronger in coherence, methodological justification, and decision relevance.
+Finally, we focused the report around a concrete decision: whether international signals should be used as early-warning inputs or treated cautiously as unreliable noise. We also clarified why the seven-country panel remains informative: it offers enough diversity to be meaningful while staying small enough for transparent analysis. Overall, the final report is narrower than the original proposal, but stronger in coherence, methodological justification, and decision relevance.
 
 # Executive Summary
 
@@ -136,7 +133,6 @@ Treat the United States VAR result as a candidate complement to the SARIMA basel
 
 <!-- ============================================================ -->
 
-\newpage
 
 # Decision Problem and Analytical Design
 
